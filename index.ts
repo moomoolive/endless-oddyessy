@@ -17,7 +17,7 @@ import {
 import 'babylonjs-loaders' // for gltf loader
 import fpsMeter from "stats.js"
 import {sweepBoxCollisions} from "./lib/physics/index"
-import {ChunkManager} from "./lib/graphics/chunkManager"
+import {Chunks} from "./lib/graphics/chunkManager"
 import {
     lerp, toRadians, toDegrees, fpEqual, 
     createAxisRotation
@@ -76,9 +76,10 @@ const main = async () => {
         scene
     )
 
-    const chunkManager = new ChunkManager()
-        .initGeneration()
-        .initRender()
+    const chunkManager = new Chunks(1)
+    if (!chunkManager.init(200.0, 200.0)) {
+        console.warn("chunk generator failed to execute")
+    }
 
     const controller = {
         left: false,
@@ -183,7 +184,7 @@ const main = async () => {
         kinematics: {mass: 10.0, gravityModifier: 1.0},
         velocity: {x: 0.0, y: 0.0, z: 0.0},
         acceleration: {x: 600.0, y: 0.25, z: 600.0},
-        position: {x: 1_000.0, y: 51.0, z: 1_000.0},
+        position: {x: 200.0, y: 51.0, z: 200.0},
         rendering: {id: 0},
     }
 
@@ -417,7 +418,7 @@ const main = async () => {
                 Math.floor(position.x), 
                 Math.floor(position.y - collider.y - 1.0), 
                 Math.floor(position.z)
-            ).active) {
+            )) {
                 impulse.y += kinematics.mass * -(GRAVITY * deltaSeconds * kinematics.gravityModifier)
             }
 
@@ -445,6 +446,11 @@ const main = async () => {
             boxCollider.position.x = playerEntity.position.x
             boxCollider.position.y = playerEntity.position.y
             boxCollider.position.z = playerEntity.position.z
+        }
+
+        {
+            const {x, z} = player.position
+            chunkManager.diffChunks(x, z)
         }
 
         // render world

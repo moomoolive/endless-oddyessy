@@ -1,7 +1,7 @@
 type Velocity = { x: number, y: number, z: number }
 type Position = { x: number, y: number, z: number }
 interface World {
-    isVoxelSolid: (x: number, y: number, z: number) => { active: boolean }
+    isVoxelSolid: (x: number, y: number, z: number) => boolean
 }
 
 export const enum axis {
@@ -32,6 +32,7 @@ const hypotenuse3d = (x: number, y: number, z: number) => Math.sqrt(x ** 2 + y *
  * @param distanceCap 
  * @returns 
  */
+/*
 export const sweepPoint = (
     position: Position,
     velocity: Velocity,
@@ -148,6 +149,7 @@ export const sweepPoint = (
     collisionRef.collided = false
     return collisionRef
 }
+*/
 
 const TRUNCATION_MARGIN_OF_ERROR =  1e-10
 const leadEdgeToInt = (lead: number, signStep: number) => Math.floor(lead - signStep * TRUNCATION_MARGIN_OF_ERROR)
@@ -349,7 +351,7 @@ class CollisionInfo {
         for (let x = xStart; x !== xEnd; x += stepX) {
             for (let y = yStart; y !== yEnd; y += stepY) {
                 for (let z = zStart; z !== zEnd; z+= stepZ) {
-                    if (!world.isVoxelSolid(x, y, z).active) {
+                    if (!world.isVoxelSolid(x, y, z)) {
                         continue
                     }
                     const distanceTraveledRatio = t / maxDistance
