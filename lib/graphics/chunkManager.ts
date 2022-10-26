@@ -423,6 +423,12 @@ export class TerrainChunk {
                     const v = yaddr(y, addressComputed)
                     voxelData[v] = biome(height, moisture)
                 }
+                // zero out the rest
+                // think of a more efficent way later?
+                for (let y = height; y < CHUNK_Y_DIM; y++) {
+                    const v = yaddr(y, addressComputed)
+                    voxelData[v] = voxel.air
+                }
             }
         }
         this.cachedOriginX = originX
@@ -706,7 +712,10 @@ const createRebuildChunkItemsX = (
     isTargetingX = true
 ) => {
     const {neg, pos} = targetAxis
-    if (neg < 1) {
+    const trailingBound = positiveAxis
+        ? neg - targetAxisDimension * (renderDistance - 1)
+        : neg - targetAxisDimension * renderDistance
+    if (trailingBound < 1) {
         return out
     }
     const xkey = positiveAxis ?
@@ -723,10 +732,8 @@ const createRebuildChunkItemsX = (
     const rowLen = chunksPerRow
     for (let i = 0; i < rowLen; i++) {
         const zkey = startzkey + i * alternateAxisDimension
-        const oldKey = isTargetingX ? 
-            chunkKey(xkey, zkey) : chunkKey(zkey, xkey)
-        const newKey = isTargetingX ? 
-            chunkKey(rebuildXkey, zkey) : chunkKey(zkey, rebuildXkey)
+        const oldKey = isTargetingX ? chunkKey(xkey, zkey) : chunkKey(zkey, xkey)
+        const newKey = isTargetingX ? chunkKey(rebuildXkey, zkey) : chunkKey(zkey, rebuildXkey)
         out.push({oldKey, newKey})
     }
     return out
@@ -768,7 +775,7 @@ export class Chunks {
         const chunkGrid = this.chunksPerRow
         const {renderDistance} = this
         const nearestXBoundary = originX - (originX % CHUNK_X_DIM)
-        const minXActual = Math.min(nearestXBoundary - (renderDistance * CHUNK_X_DIM))
+        const minXActual = nearestXBoundary - (renderDistance * CHUNK_X_DIM)
         const minX = Math.max(minXActual, 0)
         const nearestZBoundary = originZ - (originZ % CHUNK_Z_DIM)
         const minZActual = nearestZBoundary - (renderDistance * CHUNK_Z_DIM)
@@ -870,6 +877,17 @@ export class Chunks {
                 break
             case invalidation.negativez:
                 console.log("rebuild pos z")
+                this.rebuildQueue = createRebuildChunkItemsX(
+                    this.rebuildQueue,
+                    nextZ,
+                    nextX,
+                    this.renderDistance,
+                    this.chunksPerRow,
+                    false,
+                    CHUNK_Z_DIM,
+                    CHUNK_X_DIM,
+                    false
+                )
                 this.nextZBoundary = boundNeg(nextZ, CHUNK_Z_DIM)
                 break
             case invalidation.positivez:
