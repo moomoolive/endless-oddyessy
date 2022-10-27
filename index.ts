@@ -76,7 +76,7 @@ const main = async () => {
         scene
     )
 
-    const chunkManager = new Chunks(1)
+    const chunkManager = new Chunks(1, 4, 4)
     if (!chunkManager.init(200.0, 200.0)) {
         console.warn("chunk generator failed to execute")
     }

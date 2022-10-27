@@ -709,13 +709,18 @@ const createRebuildChunkItemsX = (
     positiveAxis: boolean,
     targetAxisDimension: number,
     alternateAxisDimension: number,
-    isTargetingX = true
+    isTargetingX: boolean,
+    targetAxisMax: number,
+    alternateAxisMax: number
 ) => {
     const {neg, pos} = targetAxis
     const trailingBound = positiveAxis
         ? neg - targetAxisDimension * (renderDistance - 1)
         : neg - targetAxisDimension * renderDistance
-    if (trailingBound < 1) {
+    const leadingBound = positiveAxis 
+        ? pos + targetAxisDimension * renderDistance
+        : pos + targetAxisDimension * (renderDistance - 1)
+    if (trailingBound < 1 || leadingBound > targetAxisMax) {
         return out
     }
     const xkey = positiveAxis ?
@@ -732,6 +737,9 @@ const createRebuildChunkItemsX = (
     const rowLen = chunksPerRow
     for (let i = 0; i < rowLen; i++) {
         const zkey = startzkey + i * alternateAxisDimension
+        if (zkey > alternateAxisMax) {
+            break
+        }
         const oldKey = isTargetingX ? chunkKey(xkey, zkey) : chunkKey(zkey, xkey)
         const newKey = isTargetingX ? chunkKey(rebuildXkey, zkey) : chunkKey(zkey, rebuildXkey)
         out.push({oldKey, newKey})
@@ -749,9 +757,15 @@ export class Chunks {
     nextXBoundary: AxisBoundary
     nextZBoundary: AxisBoundary
     rebuildQueue: RebuildQueue
+    maxChunksX: number
+    maxChunksZ: number
+    maxX: number
+    maxZ: number
 
     constructor(
-        renderDistance: number
+        renderDistance: number,
+        maxChunksX: number,
+        maxChunksZ: number
     ) {
         this.renderDistance = renderDistance
         this.chunkCount = distanceToChunk(renderDistance)
@@ -762,6 +776,11 @@ export class Chunks {
         this.nextXBoundary = {neg: 0, pos: 0}
         this.nextZBoundary = {neg: 0, pos: 0}
         this.rebuildQueue = []
+        this.maxChunksX = maxChunksX
+        this.maxChunksZ = maxChunksZ
+        this.maxX = maxChunksX * CHUNK_X_DIM
+        this.maxZ = maxChunksZ * CHUNK_Z_DIM
+        console.log("max_x =", this.maxX, "max_z =", this.maxZ)
     }
 
     init(originX: number, originZ: number) {
@@ -857,7 +876,10 @@ export class Chunks {
                     this.chunksPerRow,
                     false,
                     CHUNK_X_DIM,
-                    CHUNK_Z_DIM
+                    CHUNK_Z_DIM,
+                    true,
+                    this.maxX,
+                    this.maxZ,
                 )
                 this.nextXBoundary = boundNeg(nextX, CHUNK_X_DIM)
                 break
@@ -871,7 +893,10 @@ export class Chunks {
                     this.chunksPerRow,
                     true,
                     CHUNK_X_DIM,
-                    CHUNK_Z_DIM
+                    CHUNK_Z_DIM,
+                    true,
+                    this.maxX,
+                    this.maxZ,
                 )
                 this.nextXBoundary = boundPos(nextX, CHUNK_X_DIM)
                 break
@@ -886,7 +911,9 @@ export class Chunks {
                     false,
                     CHUNK_Z_DIM,
                     CHUNK_X_DIM,
-                    false
+                    false,
+                    this.maxZ,
+                    this.maxX
                 )
                 this.nextZBoundary = boundNeg(nextZ, CHUNK_Z_DIM)
                 break
@@ -901,7 +928,9 @@ export class Chunks {
                     true,
                     CHUNK_Z_DIM,
                     CHUNK_X_DIM,
-                    false
+                    false,
+                    this.maxZ,
+                    this.maxX
                 )
                 this.nextZBoundary = boundPos(nextZ, CHUNK_Z_DIM)
                 break
