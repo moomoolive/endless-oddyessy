@@ -380,6 +380,180 @@ const xaddr = (ptr: n, x: n) => ptr + (x * CHUNK_Z_DIM * CHUNK_Y_DIM)
 const zaddr = (z: n, xAddress: n) => (z * CHUNK_Y_DIM) + xAddress
 const yaddr = (y: n, zAddress: n) => y + zAddress
 const voxaddr = (x: n, y: n, z: n, ptr: n) => yaddr(y, zaddr(z, xaddr(ptr, x)))
+const elevationNoise = (x: n, z: n) => fractionalBMotion(noise1, x, z, 200.0, 6.0, 0.4, 2.0)
+const moistureNoise = (x: n, z: n) => fractionalBMotion(noise1, x, z, 512.0, 4.0, 0.5, 4.0)
+const generateHeight = (x: n, z: n) => Math.abs(~~(elevationNoise(x, z) * CHUNK_Y_DIM) + TERRAIN_MID)
+
+const createTerrainGeometry = (
+    indices: number[],
+    vertices: number[],
+    colors: number[],
+    renderNegativeY: boolean,
+    renderPositiveY: boolean,
+    renderNegativeX: boolean,
+    renderPositiveX: boolean,
+    renderNegativeZ: boolean,
+    renderPositiveZ: boolean,
+    xGlobal: number,
+    zGlobal: number,
+    yGlobal: number,
+    voxelType: number
+) => {
+    if (
+        !renderNegativeY 
+        && !renderPositiveY
+        && !renderNegativeZ 
+        && !renderPositiveZ
+        && !renderNegativeX 
+        && !renderPositiveX
+    ) {
+        return
+    }
+
+    const b = vertices.length / 3
+    vertices.push(
+        xGlobal + 0, yGlobal + 0, zGlobal + 0,
+        xGlobal + 0, yGlobal + 0, zGlobal + 1,
+        xGlobal + 1, yGlobal + 0, zGlobal + 0,
+        xGlobal + 1, yGlobal + 0, zGlobal + 1,
+        xGlobal + 0, yGlobal + 1, zGlobal + 0,
+        xGlobal + 0, yGlobal + 1, zGlobal + 1,
+        xGlobal + 1, yGlobal + 1, zGlobal + 0,
+        xGlobal + 1, yGlobal + 1, zGlobal + 1
+    )
+
+    switch(voxelType) {
+        case voxel.grass:
+            colors.push(
+                0.45, 1, 0.45, 1,
+                0.45, 1, 0.45, 1,
+                0.45, 1, 0.45, 1,
+                0.45, 1, 0.45, 1,
+                0.45, 1, 0.45, 1,
+                0.45, 1, 0.45, 1,
+                0.45, 1, 0.45, 1,
+                0.45, 1, 0.45, 1,
+            )
+            break
+        case voxel.water:
+            colors.push(
+                0.3, 0.3, 1, 1,
+                0.3, 0.3, 1, 1,
+                0.3, 0.3, 1, 1,
+                0.3, 0.3, 1, 1,
+                0.3, 0.3, 1, 1,
+                0.3, 0.3, 1, 1,
+                0.3, 0.3, 1, 1,
+                0.3, 0.3, 1, 1,
+            )
+            break
+        case voxel.dirt:
+            colors.push(
+                0.55, 0.15, 0.08, 1,
+                0.55, 0.15, 0.08, 1,
+                0.55, 0.15, 0.08, 1,
+                0.55, 0.15, 0.08, 1,
+                0.55, 0.15, 0.08, 1,
+                0.55, 0.15, 0.08, 1,
+                0.55, 0.15, 0.08, 1,
+                0.55, 0.15, 0.08, 1,
+            )
+            break
+        case voxel.stone:
+            colors.push(
+                0.8, 0.8, 0.8, 1,
+                0.8, 0.8, 0.8, 1,
+                0.8, 0.8, 0.8, 1,
+                0.8, 0.8, 0.8, 1,
+                0.8, 0.8, 0.8, 1,
+                0.8, 0.8, 0.8, 1,
+                0.8, 0.8, 0.8, 1,
+                0.8, 0.8, 0.8, 1,
+            )
+            break
+        case voxel.snow:
+            colors.push(
+                1.0, 1.0, 1.0, 1,
+                1.0, 1.0, 1.0, 1,
+                1.0, 1.0, 1.0, 1,
+                1.0, 1.0, 1.0, 1,
+                1.0, 1.0, 1.0, 1,
+                1.0, 1.0, 1.0, 1,
+                1.0, 1.0, 1.0, 1,
+                1.0, 1.0, 1.0, 1,
+            )
+            break
+        case voxel.sand:
+            colors.push(
+                0.9, 0.87, 0.65, 1,
+                0.9, 0.87, 0.65, 1,
+                0.9, 0.87, 0.65, 1,
+                0.9, 0.87, 0.65, 1,
+                0.9, 0.87, 0.65, 1,
+                0.9, 0.87, 0.65, 1,
+                0.9, 0.87, 0.65, 1,
+                0.9, 0.87, 0.65, 1,
+            )
+            break
+        default:
+            colors.push(
+                0, 1, 0, 1,
+                0, 1, 0, 1,
+                0, 1, 0, 1,
+                0, 1, 0, 1,
+                0, 1, 0, 1,
+                0, 1, 0, 1,
+                0, 1, 0, 1,
+                0, 1, 0, 1,
+            )
+            break
+    }
+
+    if (renderNegativeX) {
+        indices.push(
+            b + 0, b + 5, b + 1,
+            b + 4, b + 5, b + 0,
+        )
+    }
+    if (renderPositiveX) {
+        indices.push(
+            b + 2, b + 3, b + 7,
+            b + 2, b + 7, b + 6,
+        )
+    }
+
+    if (renderNegativeY) {
+        indices.push(
+            b + 0, b + 1, b + 2,
+            b + 3, b + 2, b + 1,
+        )
+    }
+
+    if (renderPositiveY) {
+        indices.push(
+            b + 4, b + 6, b + 5,
+            b + 7, b + 5, b + 6,
+        )
+    }
+
+    if (renderNegativeZ) {
+        indices.push(
+            b + 0, b + 2, b + 4,
+            b + 4, b + 2, b + 6,
+        )
+    }
+    
+    if (renderPositiveZ) {
+        indices.push(
+            b + 1, b + 5, b + 3,
+            b + 5, b + 7, b + 3,
+        )
+    }
+}
+
+interface VoxelChecker {
+    isVoxelSolid: (x: number, y: number, z: number) => boolean
+}
 
 export class TerrainChunk {
     id: string
@@ -389,11 +563,14 @@ export class TerrainChunk {
     voxelData: RawVoxelData
     cachedOriginX: number
     cachedOriginZ: number
+    globalRef: VoxelChecker
+    isRendered: boolean
 
     constructor(
         id: string,
         voxelPtr: number,
-        voxelData: RawVoxelData
+        voxelData: RawVoxelData,
+        globalRef: VoxelChecker
     ) {
         this.id = id
         this.voxelPtr = voxelPtr
@@ -402,6 +579,8 @@ export class TerrainChunk {
         this.voxelData = voxelData
         this.cachedOriginX = 0
         this.cachedOriginZ = 0
+        this.globalRef = globalRef
+        this.isRendered = false
     }
 
     generateVoxels(originX: number, originZ: number) {
@@ -412,13 +591,8 @@ export class TerrainChunk {
             for (let z = 0; z < CHUNK_Z_DIM; z++) {
                 const addressComputed = zaddr(z, xAddressOffset)
                 const zGlobal = originZ + z
-                const elevation = fractionalBMotion(
-                    noise1, xGlobal, zGlobal, 200.0, 6.0, 0.4, 2.00
-                )
-                const height = Math.abs(~~(elevation * 128.0) + TERRAIN_MID)
-                const moisture = fractionalBMotion(
-                    noise2, xGlobal, zGlobal, 512.0, 4.0, 0.5, 4.0
-                )
+                const height = generateHeight(xGlobal, zGlobal)
+                const moisture = moistureNoise(xGlobal, zGlobal)
                 for (let y = 0; y < height; y++) {
                     const v = yaddr(y, addressComputed)
                     voxelData[v] = biome(height, moisture)
@@ -447,9 +621,11 @@ export class TerrainChunk {
         for (let x = 0; x < CHUNK_X_DIM; x++) {
             const xGlobal = originX + x
             const xaddress = xaddr(ptr, x)
+
             for (let z = 0; z < CHUNK_Z_DIM; z++) {
                 const zGlobal = originZ + z
                 const zaddress = zaddr(z, xaddress)
+                
                 for (let y = 0; y < CHUNK_Y_DIM; y++) {
                     const v = yaddr(y, zaddress)
                     const type = voxelData[v]
@@ -461,165 +637,27 @@ export class TerrainChunk {
                     const renderNegativeY = y > 0 && voxelData[v - 1] === voxel.air
                     const renderPositiveY = y < e && voxelData[v + 1] === voxel.air
 
-                    const d = CHUNK_X_DIM - 2
-                    const renderNegativeX = x > 0 && voxelData[voxaddr(x - 1, y, z, ptr)] === voxel.air
-                    const renderPositiveX = x < d && voxelData[voxaddr(x + 1, y, z, ptr)] === voxel.air
+                    const renderNegativeX = x < 1 
+                        ? !this.globalRef.isVoxelSolid(xGlobal - 1, y, zGlobal)
+                        : voxelData[voxaddr(x - 1, y, z, ptr)] === voxel.air
+                    const renderPositiveX = x > CHUNK_X_DIM - 2 
+                        ? !this.globalRef.isVoxelSolid(xGlobal + 1, y, zGlobal)
+                        : voxelData[voxaddr(x + 1, y, z, ptr)] === voxel.air
 
-                    const c = CHUNK_Z_DIM - 2
-                    const renderNegativeZ = z > 0 && voxelData[voxaddr(x, y, z - 1, ptr)] === voxel.air
-                    const renderPositiveZ = z < c && voxelData[voxaddr(x, y, z + 1, ptr)] === voxel.air
+                    const renderNegativeZ = z < 1 
+                        ? !this.globalRef.isVoxelSolid(xGlobal, y, zGlobal - 1)
+                        : voxelData[voxaddr(x, y, z - 1, ptr)] === voxel.air
+                    const renderPositiveZ = z > CHUNK_Z_DIM - 2 
+                        ? !this.globalRef.isVoxelSolid(xGlobal, y, zGlobal + 1)
+                        : voxelData[voxaddr(x, y, z + 1, ptr)] === voxel.air
                     
-                    if (
-                        !renderNegativeY 
-                        && !renderPositiveY
-                        && !renderNegativeZ 
-                        && !renderPositiveZ
-                        && !renderNegativeX 
-                        && !renderPositiveX
-                    ) {
-                        continue
-                    }
-
-                    const b = vertices.length / 3
-                    vertices.push(
-                        xGlobal + 0, y + 0, zGlobal + 0,
-                        xGlobal + 0, y + 0, zGlobal + 1,
-                        xGlobal + 1, y + 0, zGlobal + 0,
-                        xGlobal + 1, y + 0, zGlobal + 1,
-                        xGlobal + 0, y + 1, zGlobal + 0,
-                        xGlobal + 0, y + 1, zGlobal + 1,
-                        xGlobal + 1, y + 1, zGlobal + 0,
-                        xGlobal + 1, y + 1, zGlobal + 1
+                    createTerrainGeometry(
+                        indices, vertices, colors,
+                        renderNegativeY, renderPositiveY,
+                        renderNegativeX, renderPositiveX,
+                        renderNegativeZ, renderPositiveZ,
+                        xGlobal, zGlobal, y, type 
                     )
-
-                    switch(type) {
-                        case voxel.grass:
-                            colors.push(
-                                0.45, 1, 0.45, 1,
-                                0.45, 1, 0.45, 1,
-                                0.45, 1, 0.45, 1,
-                                0.45, 1, 0.45, 1,
-                                0.45, 1, 0.45, 1,
-                                0.45, 1, 0.45, 1,
-                                0.45, 1, 0.45, 1,
-                                0.45, 1, 0.45, 1,
-                            )
-                            break
-                        case voxel.water:
-                            colors.push(
-                                0.3, 0.3, 1, 1,
-                                0.3, 0.3, 1, 1,
-                                0.3, 0.3, 1, 1,
-                                0.3, 0.3, 1, 1,
-                                0.3, 0.3, 1, 1,
-                                0.3, 0.3, 1, 1,
-                                0.3, 0.3, 1, 1,
-                                0.3, 0.3, 1, 1,
-                            )
-                            break
-                        case voxel.dirt:
-                            colors.push(
-                                0.55, 0.15, 0.08, 1,
-                                0.55, 0.15, 0.08, 1,
-                                0.55, 0.15, 0.08, 1,
-                                0.55, 0.15, 0.08, 1,
-                                0.55, 0.15, 0.08, 1,
-                                0.55, 0.15, 0.08, 1,
-                                0.55, 0.15, 0.08, 1,
-                                0.55, 0.15, 0.08, 1,
-                            )
-                            break
-                        case voxel.stone:
-                            colors.push(
-                                0.8, 0.8, 0.8, 1,
-                                0.8, 0.8, 0.8, 1,
-                                0.8, 0.8, 0.8, 1,
-                                0.8, 0.8, 0.8, 1,
-                                0.8, 0.8, 0.8, 1,
-                                0.8, 0.8, 0.8, 1,
-                                0.8, 0.8, 0.8, 1,
-                                0.8, 0.8, 0.8, 1,
-                            )
-                            break
-                        case voxel.snow:
-                            colors.push(
-                                1.0, 1.0, 1.0, 1,
-                                1.0, 1.0, 1.0, 1,
-                                1.0, 1.0, 1.0, 1,
-                                1.0, 1.0, 1.0, 1,
-                                1.0, 1.0, 1.0, 1,
-                                1.0, 1.0, 1.0, 1,
-                                1.0, 1.0, 1.0, 1,
-                                1.0, 1.0, 1.0, 1,
-                            )
-                            break
-                        case voxel.sand:
-                            colors.push(
-                                0.9, 0.87, 0.65, 1,
-                                0.9, 0.87, 0.65, 1,
-                                0.9, 0.87, 0.65, 1,
-                                0.9, 0.87, 0.65, 1,
-                                0.9, 0.87, 0.65, 1,
-                                0.9, 0.87, 0.65, 1,
-                                0.9, 0.87, 0.65, 1,
-                                0.9, 0.87, 0.65, 1,
-                            )
-                            break
-                        default:
-                            colors.push(
-                                0, 1, 0, 1,
-                                0, 1, 0, 1,
-                                0, 1, 0, 1,
-                                0, 1, 0, 1,
-                                0, 1, 0, 1,
-                                0, 1, 0, 1,
-                                0, 1, 0, 1,
-                                0, 1, 0, 1,
-                            )
-                            break
-                    }
-
-                    if (renderNegativeX) {
-                        indices.push(
-                            b + 0, b + 5, b + 1,
-                            b + 4, b + 5, b + 0,
-                        )
-                    }
-                    if (renderPositiveX) {
-                        indices.push(
-                            b + 2, b + 3, b + 7,
-                            b + 2, b + 7, b + 6,
-                        )
-                    }
-
-                    if (renderNegativeY) {
-                        indices.push(
-                            b + 0, b + 1, b + 2,
-                            b + 3, b + 2, b + 1,
-                        )
-                    }
-            
-                    if (renderPositiveY) {
-                        indices.push(
-                            b + 4, b + 6, b + 5,
-                            b + 7, b + 5, b + 6,
-                        )
-                    }
-
-                    if (renderNegativeZ) {
-                        indices.push(
-                            b + 0, b + 2, b + 4,
-                            b + 4, b + 2, b + 6,
-                        )
-                    }
-                    
-                    if (renderPositiveZ) {
-                        indices.push(
-                            b + 1, b + 5, b + 3,
-                            b + 5, b + 7, b + 3,
-                        )
-                    }
-
                 }
             }
         }
@@ -628,6 +666,12 @@ export class TerrainChunk {
         vd.positions = vertices
         vd.colors = colors
         vd.applyToMesh(mesh, true)
+    }
+
+    destroyMesh() {
+        const name = this.mesh.name
+        this.mesh.dispose()
+        this.mesh = new Mesh(name)
     }
 }
 
@@ -700,12 +744,15 @@ const diffChunkBoundaries = (
 type RebuildQueue = {oldKey: string, newKey: string}[]
 type AxisBoundary = {pos: number, neg: number}
 
-const createRebuildChunkItemsX = (
+const createRebuildChunkItems = (
     out: RebuildQueue,
+    simulationQueue: RebuildQueue,
     targetAxis: AxisBoundary,
     alternateAxis: AxisBoundary,
     renderDistance: number,
+    simulationDistance: number,
     chunksPerRow: number,
+    simulationChunksPerRow: number,
     positiveAxis: boolean,
     targetAxisDimension: number,
     alternateAxisDimension: number,
@@ -734,16 +781,57 @@ const createRebuildChunkItemsX = (
             alternateAxis.neg - renderDistance * alternateAxisDimension, 
             0
         )
+    
     const rowLen = chunksPerRow
     for (let i = 0; i < rowLen; i++) {
         const zkey = startzkey + i * alternateAxisDimension
         if (zkey > alternateAxisMax) {
             break
         }
-        const oldKey = isTargetingX ? chunkKey(xkey, zkey) : chunkKey(zkey, xkey)
-        const newKey = isTargetingX ? chunkKey(rebuildXkey, zkey) : chunkKey(zkey, rebuildXkey)
+        const oldKey = isTargetingX 
+            ? chunkKey(xkey, zkey) 
+            : chunkKey(zkey, xkey)
+        const newKey = isTargetingX 
+            ? chunkKey(rebuildXkey, zkey) 
+            : chunkKey(zkey, rebuildXkey)
         out.push({oldKey, newKey})
     }
+
+    const trailingSimulation = trailingBound - targetAxisDimension
+    const leadingSimulation = leadingBound + targetAxisDimension 
+    if (trailingSimulation < 1 || leadingSimulation > targetAxisMax) {
+        return out
+    }
+
+    const simXKey = positiveAxis 
+        ? xkey - targetAxisDimension
+        : xkey + targetAxisDimension
+    const simRebuildXKey = positiveAxis
+        ? rebuildXkey + targetAxisDimension
+        : rebuildXkey - targetAxisDimension
+    const simStartZKey = alternateAxis.neg < 1
+        ? 0
+        : Math.max(
+            alternateAxis.neg - simulationDistance * alternateAxisDimension, 
+            0
+        )
+    
+    const simRowLen = simulationChunksPerRow
+    for (let i = 0; i < simRowLen; i++) {
+        const zkey = simStartZKey + i * alternateAxisDimension
+        if (zkey > alternateAxisMax) {
+            break
+        }
+        const oldKey = isTargetingX 
+            ? chunkKey(simXKey, zkey) 
+            : chunkKey(zkey, simXKey)
+        const newKey = isTargetingX 
+            ? chunkKey(simRebuildXKey, zkey) 
+            : chunkKey(zkey, simRebuildXKey)
+        console.log("item", {oldKey, newKey})
+        simulationQueue.push({oldKey, newKey})
+    }
+
     return out
 }
 
@@ -757,10 +845,14 @@ export class Chunks {
     nextXBoundary: AxisBoundary
     nextZBoundary: AxisBoundary
     rebuildQueue: RebuildQueue
+    simulationQueue: RebuildQueue
     maxChunksX: number
     maxChunksZ: number
     maxX: number
     maxZ: number
+    simulationDistance: number
+    renderableChunksCount: number
+    renderableChunksPerRow: number
 
     constructor(
         renderDistance: number,
@@ -768,7 +860,10 @@ export class Chunks {
         maxChunksZ: number
     ) {
         this.renderDistance = renderDistance
-        this.chunkCount = distanceToChunk(renderDistance)
+        this.simulationDistance = renderDistance + 1
+        this.chunkCount = distanceToChunk(this.simulationDistance)
+        this.renderableChunksCount = distanceToChunk(renderDistance)
+        this.renderableChunksPerRow = Math.sqrt(this.renderableChunksCount)
         this.chunksPerRow = Math.sqrt(this.chunkCount)
         this.voxelBuffer = new Int32Array()
         this.chunks = []
@@ -776,11 +871,11 @@ export class Chunks {
         this.nextXBoundary = {neg: 0, pos: 0}
         this.nextZBoundary = {neg: 0, pos: 0}
         this.rebuildQueue = []
+        this.simulationQueue = []
         this.maxChunksX = maxChunksX
         this.maxChunksZ = maxChunksZ
         this.maxX = maxChunksX * CHUNK_X_DIM
         this.maxZ = maxChunksZ * CHUNK_Z_DIM
-        console.log("max_x =", this.maxX, "max_z =", this.maxZ)
     }
 
     init(originX: number, originZ: number) {
@@ -805,7 +900,8 @@ export class Chunks {
             for (let z = 0; z < chunkGrid; z++) {
                 const id = (x * chunkGrid) + z
                 const chunk = new TerrainChunk(
-                    id.toString(), id * chunkBytes, this.voxelBuffer
+                    id.toString(), id * chunkBytes, 
+                    this.voxelBuffer, this
                 )
                 const xOffset = minX + (x * CHUNK_X_DIM)
                 const zOffset = minZ + (z * CHUNK_Z_DIM)
@@ -814,10 +910,25 @@ export class Chunks {
                 chunkMap[chunkKey(xOffset, zOffset)] = id
             }
         }
+        console.log("map", chunkMap)
 
         // render initially constructed voxel data
-        for (let i = 0; i < this.chunks.length; i++) {
-            this.chunks[i].render()
+        // only get renderable chunks
+        const renderableChunks = this.renderableChunksPerRow
+        for (let x = 0; x < renderableChunks; x++) {
+            for (let z = 0; z < renderableChunks; z++) {
+                const xkey = minX + (x * CHUNK_X_DIM)
+                const zkey = minZ + (z * CHUNK_Z_DIM)
+                const key = chunkKey(xkey, zkey)
+                const id = chunkMap[key]
+                if (id === undefined || id === chunk_encoding.null) {
+                    console.warn(`one of the initialized chunks is missing! Skipping! missing => x=${xkey}, z=${zkey}`)
+                    continue
+                }
+                const chunk = this.chunks[id]
+                chunk.render()
+                chunk.isRendered = true
+            }
         }
         const {nextXBoundary, nextZBoundary} = this
         nextXBoundary.neg = nearestXBoundary
@@ -828,8 +939,10 @@ export class Chunks {
     }
 
     isVoxelSolid(x: number, y: number, z: number) {
-        if (x < 0 || z < 0 || y < 0 || y > CHUNK_Y_DIM) {
+        if (x < 0 || z < 0 || y < 0) {
             return true
+        } else if (y >= CHUNK_Y_DIM) {
+            return false
         }
         const intx = ~~(x)
         const intz = ~~(z)
@@ -868,11 +981,14 @@ export class Chunks {
         switch (diffFlags) {
             case invalidation.negativex:
                 console.log("rebuild pos x")
-                this.rebuildQueue = createRebuildChunkItemsX(
+                this.rebuildQueue = createRebuildChunkItems(
                     this.rebuildQueue,
+                    this.simulationQueue,
                     nextX,
                     nextZ,
                     this.renderDistance,
+                    this.simulationDistance,
+                    this.renderableChunksPerRow,
                     this.chunksPerRow,
                     false,
                     CHUNK_X_DIM,
@@ -885,11 +1001,14 @@ export class Chunks {
                 break
             case invalidation.positivex:
                 console.log("rebuild neg x")
-                this.rebuildQueue = createRebuildChunkItemsX(
+                this.rebuildQueue = createRebuildChunkItems(
                     this.rebuildQueue,
+                    this.simulationQueue,
                     nextX,
                     nextZ,
                     this.renderDistance,
+                    this.simulationDistance,
+                    this.renderableChunksPerRow,
                     this.chunksPerRow,
                     true,
                     CHUNK_X_DIM,
@@ -902,11 +1021,14 @@ export class Chunks {
                 break
             case invalidation.negativez:
                 console.log("rebuild pos z")
-                this.rebuildQueue = createRebuildChunkItemsX(
+                this.rebuildQueue = createRebuildChunkItems(
                     this.rebuildQueue,
+                    this.simulationQueue,
                     nextZ,
                     nextX,
                     this.renderDistance,
+                    this.simulationDistance,
+                    this.renderableChunksPerRow,
                     this.chunksPerRow,
                     false,
                     CHUNK_Z_DIM,
@@ -919,11 +1041,14 @@ export class Chunks {
                 break
             case invalidation.positivez:
                 console.log("rebuild neg z")
-                this.rebuildQueue = createRebuildChunkItemsX(
+                this.rebuildQueue = createRebuildChunkItems(
                     this.rebuildQueue,
+                    this.simulationQueue,
                     nextZ,
                     nextX,
                     this.renderDistance,
+                    this.simulationDistance,
+                    this.renderableChunksPerRow,
                     this.chunksPerRow,
                     true,
                     CHUNK_Z_DIM,
@@ -939,11 +1064,11 @@ export class Chunks {
                 break
         }
 
-        const {rebuildQueue: q, chunkMap} = this
-        // rebuild a maximum of one chunk
+        const {simulationQueue, rebuildQueue, chunkMap} = this
+        // rebuild & render a maximum of one chunk
         // per frame.
-        if (q.length > 0) {
-            const {oldKey, newKey} = q[q.length - 1]
+        if (simulationQueue.length > 0) {
+            const {oldKey, newKey} = simulationQueue[simulationQueue.length - 1]
             const chunkref = chunkMap[oldKey]
             const chunk = this.chunks[chunkref]
             const [xstr, zstr] = newKey.split(".")
@@ -952,9 +1077,25 @@ export class Chunks {
             chunk.generateVoxels(x, z)
             chunkMap[oldKey] = chunk_encoding.null
             chunkMap[newKey] = chunkref
-            chunk.render()
-            console.log("rebuilt", newKey, "in place of", oldKey)
-            q.pop()
+            console.log("simulated", newKey, "in place of", oldKey)
+            if (simulationQueue.length < 2) {
+                console.log("map", this.chunkMap)
+            }
+            simulationQueue.pop()
+        } else if (rebuildQueue.length > 0) {
+            const {oldKey, newKey} = rebuildQueue[rebuildQueue.length - 1]
+            const oldChunkRef = chunkMap[oldKey]
+            this.chunks[oldChunkRef].destroyMesh()
+            //const [xstr, zstr] = newKey.split(".")
+            //const x = parseInt(xstr, 10)
+            //const z = parseInt(zstr, 10)
+            //chunk.generateVoxels(x, z)
+            //chunkMap[oldKey] = chunk_encoding.null
+            // chunkMap[newKey] = chunkref
+            const newChunkRef = chunkMap[newKey]
+            this.chunks[newChunkRef].render()
+            console.log("rendered", newKey, "in place of", oldKey)
+            rebuildQueue.pop()
         }
     }
 }
