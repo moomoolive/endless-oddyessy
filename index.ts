@@ -76,11 +76,6 @@ const main = async () => {
         scene
     )
 
-    const chunkManager = new Chunks(1, 40, 40)
-    if (!chunkManager.init(200.0, 200.0)) {
-        console.warn("chunk generator failed to execute")
-    }
-
     const controller = {
         left: false,
         right: false,
@@ -177,6 +172,12 @@ const main = async () => {
 
     canvas.onclick  = () => canvas.requestPointerLock()
 
+    const chunkManager = new Chunks({
+        renderDistance: 8,
+        maxChunksX: 160,
+        maxChunksZ: 160
+    })
+
     const playerEntity = {
         transform: {x: 0.0, y: 0.0, z: 0.0},
         impulse: {x: 0.0, y: 0.0, z: 0.0},
@@ -184,8 +185,14 @@ const main = async () => {
         kinematics: {mass: 10.0, gravityModifier: 1.0},
         velocity: {x: 0.0, y: 0.0, z: 0.0},
         acceleration: {x: 600.0, y: 0.25, z: 600.0},
-        position: {x: 200.0, y: 100.0, z: 200.0},
+        position: {x: 15.0, y: 100.0, z: 200.0},
         rendering: {id: 0},
+    }
+    {
+        const {x, z} = playerEntity.position
+        if (!chunkManager.init(x, z)) {
+            console.warn("chunk generator failed to execute")
+        }
     }
 
     const p = await playerModelPromise
