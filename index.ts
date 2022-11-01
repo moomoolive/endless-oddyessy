@@ -173,9 +173,9 @@ const main = async () => {
     canvas.onclick  = () => canvas.requestPointerLock()
 
     const chunkManager = new Chunks({
-        renderDistance: 8,
-        maxChunksX: 160,
-        maxChunksZ: 160
+        renderDistance: 4,
+        maxChunksX: 14,
+        maxChunksZ: 14
     })
 
     const playerEntity = {

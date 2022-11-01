@@ -479,7 +479,7 @@ const createRebuildChunkItems = (
     const leadingBound = positiveAxis 
         ? pos + targetAxisDimension * renderDistance
         : pos + targetAxisDimension * (renderDistance - 1)
-    if (trailingBound < 1 || leadingBound > targetAxisMax) {
+    if (trailingBound < 1 || leadingBound >= targetAxisMax) {
         return out
     }
     const xkey = positiveAxis ?
@@ -488,16 +488,18 @@ const createRebuildChunkItems = (
     const rebuildXkey = positiveAxis ? 
         pos + targetAxisDimension * renderDistance
         : neg - targetAxisDimension * (renderDistance + 1)
-    const startzkey = alternateAxis.neg < 1 ? 
-        0 : Math.max(
-            alternateAxis.neg - renderDistance * alternateAxisDimension, 
-            0
-        )
-    
+    const {min: startzkey} = calculateStartChunk(
+        alternateAxis.neg,
+        renderDistance,
+        chunksPerRow,
+        alternateAxisDimension,
+        alternateAxisMax
+    )
+
     const rowLen = chunksPerRow
     for (let i = 0; i < rowLen; i++) {
         const zkey = startzkey + i * alternateAxisDimension
-        if (zkey > alternateAxisMax) {
+        if (zkey >= alternateAxisMax) {
             break
         }
         const oldKey = isTargetingX 
@@ -511,15 +513,9 @@ const createRebuildChunkItems = (
 
     const trailingSimulation = trailingBound - targetAxisDimension
     const leadingSimulation = leadingBound + targetAxisDimension 
-    if (trailingSimulation < 1 || leadingSimulation > targetAxisMax) {
+    if (trailingSimulation < 1 || leadingSimulation >= targetAxisMax) {
         return out
     }
-
-    console.log(
-        "xkey", xkey,
-        "pos?", positiveAxis,
-        "rexkey", rebuildXkey
-    )
 
     const simXKey = positiveAxis 
         ? xkey - targetAxisDimension
@@ -527,17 +523,19 @@ const createRebuildChunkItems = (
     const simRebuildXKey = positiveAxis
         ? rebuildXkey + targetAxisDimension
         : rebuildXkey - targetAxisDimension
-    const simStartZKey = alternateAxis.neg < 1
-        ? 0
-        : Math.max(
-            alternateAxis.neg - simulationDistance * alternateAxisDimension, 
-            0
-        )
-    
+    const {min: simStartZKey} = calculateStartChunk(
+        alternateAxis.neg,
+        simulationDistance,
+        simulationChunksPerRow,
+        alternateAxisDimension,
+        alternateAxisMax
+    )
     const simRowLen = simulationChunksPerRow
+    console.log("sim row len", simRowLen)
     for (let i = 0; i < simRowLen; i++) {
         const zkey = simStartZKey + i * alternateAxisDimension
-        if (zkey > alternateAxisMax) {
+        if (zkey >= alternateAxisMax) {
+            console.log("zkey bound reached", zkey, "max", alternateAxisMax)
             break
         }
         const oldKey = isTargetingX 
@@ -560,21 +558,46 @@ class Logger {
         this.name = name
     }
 
+    get identity() {
+        return `[${this.name}]:`
+    }
+
     warn(...msgs: any[]) {
-        console.warn(`[${this.name}]`, ...msgs)
+        console.warn(this.identity, ...msgs)
     }
 
     error(...msgs: any[]) {
-        console.error(`[${this.name}]`, ...msgs)
+        console.error(this.identity, ...msgs)
     }
 
     log(...msgs: any[]) {
-        console.log(`[${this.name}]`, ...msgs)
+        console.log(this.identity, ...msgs)
     }
     
     info(...msgs: any[]) {
-        console.info(`[${this.name}]`, ...msgs)
+        console.info(this.identity, ...msgs)
     }
+}
+
+const startChunkContainer = {min: 0, translation: 0}
+const calculateStartChunk = (
+    nearestBoundary: number,
+    simulationDistance: number,
+    totalSimulatedChunks: number,
+    chunkDimension: number,
+    axisLimit: number
+) => {
+    const axisMinReal = nearestBoundary - (simulationDistance * CHUNK_Z_DIM)
+    const axisMinPreliminary = Math.max(axisMinReal, 0)
+    const axisMaxReal = axisMinPreliminary + chunkDimension * totalSimulatedChunks
+    const axisMax = axisMaxReal >= axisLimit ? axisLimit : axisMaxReal
+    const axisMaxDiff = axisMaxReal - axisMax
+    const min = axisMaxDiff > 0
+        ? Math.max(0, axisMinPreliminary - axisMaxDiff)
+        : axisMinPreliminary
+    startChunkContainer.min = min
+    startChunkContainer.translation = -axisMaxDiff
+    return startChunkContainer
 }
 
 export class Chunks {
@@ -645,11 +668,39 @@ export class Chunks {
         const chunkGrid = this.chunksPerRow
         const {simulationDistance} = this
         const nearestXBoundary = originX - (originX % CHUNK_X_DIM)
+        /*
+        const nearestXBoundary = originX - (originX % CHUNK_X_DIM)
         const minXActual = nearestXBoundary - (simulationDistance * CHUNK_X_DIM)
         const minX = Math.max(minXActual, 0)
+        */
+        const {min: minX, translation: xTrans} = calculateStartChunk(
+            nearestXBoundary,
+            simulationDistance,
+            chunkGrid,
+            CHUNK_X_DIM,
+            this.maxX
+        ) 
         const nearestZBoundary = originZ - (originZ % CHUNK_Z_DIM)
+        /*
         const minZActual = nearestZBoundary - (simulationDistance * CHUNK_Z_DIM)
-        const minZ = Math.max(minZActual, 0)
+        const minZprelim = Math.max(minZActual, 0)
+        const maxZactual = minZprelim + CHUNK_Z_DIM * (chunkGrid - 1)
+        const maxZ = maxZactual >= this.maxZ 
+            ? this.maxZ
+            : maxZactual
+        const maxZdiff = maxZactual - maxZ
+        const minZ = maxZdiff > 0
+            ? Math.max(0, minZprelim - maxZdiff)
+            : minZprelim
+        */
+        const {min: minZ, translation: zTrans} = calculateStartChunk(
+            nearestZBoundary,
+            simulationDistance,
+            chunkGrid,
+            CHUNK_Z_DIM,
+            this.maxZ
+        )
+        console.log("minz", minZ, "limitz", this.maxZ, "trans_neg", zTrans)
         const {chunkMap} = this
         for (let x = 0; x < chunkGrid; x++) {
             for (let z = 0; z < chunkGrid; z++) {
@@ -660,23 +711,26 @@ export class Chunks {
                 )
                 const xOffset = minX + (x * CHUNK_X_DIM)
                 const zOffset = minZ + (z * CHUNK_Z_DIM)
+                //console.log("inited x", xOffset, "z", zOffset)
                 chunk.generateVoxels(xOffset, zOffset)
                 this.chunks.push(chunk)
                 chunkMap[chunkKey(xOffset, zOffset)] = id
             }
         }
+        console.log("nearx", nearestXBoundary, "nearz", nearestZBoundary)
         console.log("map", chunkMap)
 
         // render initially constructed voxel data
         // only get renderable chunks
         const {renderDistance} = this
         const renderXStart = Math.max(
-            0, nearestXBoundary - renderDistance * CHUNK_X_DIM
+            0, (nearestXBoundary - renderDistance * CHUNK_X_DIM) + xTrans + CHUNK_X_DIM
         )
         const renderZStart = Math.max(
-            0, nearestZBoundary - renderDistance * CHUNK_Z_DIM
+            0, (nearestZBoundary - renderDistance * CHUNK_Z_DIM) + zTrans + CHUNK_Z_DIM
         )
         const renderableChunks = this.renderableChunksPerRow
+        console.log("startx", renderXStart, "startz", renderZStart, "chunks", renderableChunks)
         for (let x = 0; x < renderableChunks; x++) {
             for (let z = 0; z < renderableChunks; z++) {
                 const xkey = renderXStart + (x * CHUNK_X_DIM)
@@ -847,8 +901,8 @@ export class Chunks {
             simulationQueue.pop()
         } else if (rebuildQueue.length > 0) {
             const {oldKey, newKey} = rebuildQueue[rebuildQueue.length - 1]
-            console.log("rendered", newKey, "in place of", oldKey)
             const oldChunkRef = chunkMap[oldKey]
+            console.log("rendered", newKey, "in place of", oldKey)
             this.chunks[oldChunkRef].destroyMesh()
             const newChunkRef = chunkMap[newKey]
             this.chunks[newChunkRef].render()
