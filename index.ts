@@ -13,10 +13,15 @@ import {
     ArcRotateCamera,
     Quaternion,
     CreateBox,
+    Color4,
 } from "babylonjs"
 import 'babylonjs-loaders' // for gltf loader
 import fpsMeter from "stats.js"
-import {sweepBoxCollisions} from "./lib/physics/index"
+import {
+    sweepBoxCollisions, 
+    sweepPoint,
+    CollisionInfo
+} from "./lib/physics/index"
 import {Chunks} from "./lib/graphics/chunkManager"
 import {
     lerp, toRadians, toDegrees, fpEqual, 
@@ -90,7 +95,8 @@ const main = async () => {
         cameraUp: false,
         cameraDown: false,
         cameraZoomIn: false,
-        cameraZoomOut: false
+        cameraZoomOut: false,
+        interact: false
     }
 
     window.addEventListener("keydown", (e) => {
@@ -109,6 +115,9 @@ const main = async () => {
                 break
             case "d":
                 controller.right = true
+                break
+            case "q":
+                controller.interact = true
                 break
             case " ":
                 controller.up = true
@@ -132,6 +141,9 @@ const main = async () => {
                 break
             case "d":
                 controller.right = false
+                break
+            case "q":
+                controller.interact = false
                 break
             case " ":
                 controller.up = false
@@ -185,7 +197,7 @@ const main = async () => {
         kinematics: {mass: 10.0, gravityModifier: 1.0},
         velocity: {x: 0.0, y: 0.0, z: 0.0},
         acceleration: {x: 600.0, y: 0.25, z: 600.0},
-        position: {x: 15.0, y: 100.0, z: 200.0},
+        position: {x: 45.0, y: 100.0, z: 200.0},
         rendering: {id: 0},
     }
     {
@@ -223,36 +235,63 @@ const main = async () => {
 
     const movementVec = {horizontal: 0, vertical: 0, angle: 0}
 
+    const editingToolEntity = {
+        selectedType: 1,
+        focus: {x: 0.0, y: 0.0, z: 0.0}
+    }
+
+    const editMaterial = new StandardMaterial("EditBoxMaterial", scene)
+
+    editMaterial.alpha = 0.6
+    const editingBlock = CreateBox("editingBlock", {
+        width: 1.02, height: 1.02, depth: 1.02,
+        updatable: true,
+        faceColors: [
+            new Color4(0, 1, 0, 1.0),
+            new Color4(0, 1, 0, 1.0),
+            new Color4(0, 1, 0, 1.0),
+            new Color4(0, 1, 0, 1.0),
+            new Color4(0, 1, 0, 1.0),
+            new Color4(0, 1, 0, 1.0),
+        ]
+    }, scene)
+    editingBlock.position.set(46.0, 50.5, 200.0)
+    editingBlock.material = editMaterial
+
+    const editingBlockRayCast = new CollisionInfo()
     engine.runRenderLoop(() => {
         meter.begin()
         const deltaTime = engine.getDeltaTime()
         const deltaSeconds = deltaTime * 0.0001
         
         // input updates
-        movementVec.horizontal = 0
-        movementVec.vertical = 0
+        {
+            movementVec.horizontal = 0
+            movementVec.vertical = 0
 
-        if (controller.forward) {
-            movementVec.horizontal += Math.cos(Math.PI - camera.alpha)
-            movementVec.vertical += Math.sin(Math.PI - camera.alpha)
-        }
-    
-        if (controller.backward) {
-            movementVec.horizontal += Math.cos(Math.PI * 2 - camera.alpha)
-            movementVec.vertical += Math.sin(Math.PI * 2 - camera.alpha)
-        }
-    
-        if (controller.left) {
-            movementVec.horizontal += Math.cos(Math.PI / 2 - camera.alpha)
-            movementVec.vertical += Math.sin(Math.PI / 2 - camera.alpha)
-        }
-    
-        if (controller.right) {
-            movementVec.horizontal += Math.cos(3 * Math.PI / 2 - camera.alpha)
-            movementVec.vertical += Math.sin(3 * Math.PI / 2 - camera.alpha)
-        } 
+            if (controller.forward) {
+                movementVec.horizontal += Math.cos(Math.PI - camera.alpha)
+                movementVec.vertical += Math.sin(Math.PI - camera.alpha)
+            }
         
-        movementVec.angle = Math.atan2(movementVec.vertical, movementVec.horizontal) / (Math.PI / 180)
+            if (controller.backward) {
+                movementVec.horizontal += Math.cos(Math.PI * 2 - camera.alpha)
+                movementVec.vertical += Math.sin(Math.PI * 2 - camera.alpha)
+            }
+        
+            if (controller.left) {
+                movementVec.horizontal += Math.cos(Math.PI / 2 - camera.alpha)
+                movementVec.vertical += Math.sin(Math.PI / 2 - camera.alpha)
+            }
+        
+            if (controller.right) {
+                movementVec.horizontal += Math.cos(3 * Math.PI / 2 - camera.alpha)
+                movementVec.vertical += Math.sin(3 * Math.PI / 2 - camera.alpha)
+            } 
+            
+            const moveAngleRadians = Math.atan2(movementVec.vertical, movementVec.horizontal)
+            movementVec.angle = toDegrees(moveAngleRadians)
+        }
         
         // process mouse movement (controller adaptor)
         {
@@ -359,8 +398,10 @@ const main = async () => {
             playerEntity.velocity.z += frameDecleration.z
         
             if (
-                controller.forward || controller.backward ||
-                controller.left || controller.right
+                controller.forward 
+                || controller.backward 
+                || controller.left 
+                || controller.right
             ) {
                 playerEntity.velocity.z += playerEntity.acceleration.z * deltaSeconds * - movementVec.vertical
                 playerEntity.velocity.x += playerEntity.acceleration.x * deltaSeconds * movementVec.horizontal
@@ -453,6 +494,104 @@ const main = async () => {
             boxCollider.position.x = playerEntity.position.x
             boxCollider.position.y = playerEntity.position.y
             boxCollider.position.z = playerEntity.position.z
+        }
+
+        // update block tool
+        {
+            const {x, y, z} = playerEntity.position
+            const xbias = 1.5
+            const ybias = 0.5
+            
+            editingBlock.position.x = x + xbias
+            editingBlock.position.y = y - ybias
+            editingBlock.position.z = z
+
+            // camera vertical angle
+            const yspeed = Math.cos(Math.PI - camera.beta)
+            const horizontalAngle = Math.cos(Math.PI - camera.alpha)
+            const verticalAngle = Math.sin(Math.PI * 2 - camera.alpha)
+            
+            const {position} = playerEntity
+            const res = sweepPoint(
+                position,
+                {
+                    x: horizontalAngle * 10, 
+                    y: yspeed * 10, 
+                    z: verticalAngle * 10
+                },
+                chunkManager,
+                0.2,
+                3,
+                editingBlockRayCast
+            )
+
+            if (res.collided) {
+                const {distanceTraveled, normal} = res
+                const x = ~~(position.x + distanceTraveled.x)
+                const y = ~~(position.y + distanceTraveled.y)
+                const z = ~~(position.z + distanceTraveled.y)
+                const topIsBlocked = chunkManager.isVoxelSolid(
+                    x, y + 1, z
+                )
+                //console.log(
+                //    "collided", x, y, z, "norm", normal,
+                //    "top is blocked", topIsBlocked
+                //)
+                const pos = editingBlock.position
+                
+                if (
+                    !topIsBlocked
+                    && (pos.x !== x || pos.y !== y || pos.z !== z)
+                ) {
+                    //editingBlock.position.set(x + 0.5, y + 1.5, z + 0.5)
+                    switch (normal) {
+                        case 3:
+                            editingBlock.position.set(x + 0.5, y + 1.5, z + 1.5)
+                            break
+                        case -3:
+                            editingBlock.position.set(x + 0.5, y + 1.5, z - 0.5)
+                            break
+                        case 2:
+                            editingBlock.position.set(x + 0.5, y - 1.5, z + 0.5)
+                            break
+                        case -2:
+                            editingBlock.position.set(x + 0.5, y + 1.5, z + 0.5)
+                            break
+                        case 1:
+                            editingBlock.position.set(x + 0.5, y + 1.5, z + 0.5)
+                            break
+                        case -1:
+                            editingBlock.position.set(x - 0.5, y + 1.5, z + 0.5)
+                            break
+                    }
+                    editingToolEntity.focus.x = editingBlock.position.x
+                    editingToolEntity.focus.y = editingBlock.position.y
+                    editingToolEntity.focus.z = editingBlock.position.z
+                }
+            } else {
+                const {distanceTraveled} = res
+                const x = ~~(position.x + distanceTraveled.x)
+                const y = ~~(position.y + distanceTraveled.y)
+                const z = ~~(position.z + distanceTraveled.z)
+                //console.log("edit", x, y, z)
+                editingBlock.position.set(
+                    x + (distanceTraveled.x < 0 && distanceTraveled.x > distanceTraveled.z ? -0.0 : 0.5), 
+                    y + 0.5,
+                    z + (distanceTraveled.z < 0 && distanceTraveled.z > distanceTraveled.x ? -0.0: 0.5)
+                )
+                editingToolEntity.focus.x = x
+                editingToolEntity.focus.y = y
+                editingToolEntity.focus.z = z
+                if (controller.interact) {
+                    chunkManager.mutateVoxel(x, y, z, 1)
+                }
+            }
+
+            if (controller.interact) {
+                const {focus: {x, y, z}, selectedType} = editingToolEntity
+                chunkManager.mutateVoxel(x, y, z, selectedType)
+            }
+
         }
 
         {

@@ -619,6 +619,7 @@ export class Chunks {
     renderableChunksCount: number
     renderableChunksPerRow: number
     logger: Logger
+    dirtyChunks: number[]
 
     constructor({
         renderDistance = 1, 
@@ -643,6 +644,7 @@ export class Chunks {
         this.maxX = maxChunksX * CHUNK_X_DIM
         this.maxZ = maxChunksZ * CHUNK_Z_DIM
         this.logger = new Logger("chunk manager")
+        this.dirtyChunks = []
     }
 
     init(originX: number, originZ: number) {
@@ -735,7 +737,7 @@ export class Chunks {
             for (let z = 0; z < renderableChunks; z++) {
                 const xkey = renderXStart + (x * CHUNK_X_DIM)
                 const zkey = renderZStart + (z * CHUNK_Z_DIM)
-                console.log("init render x", xkey, "z", zkey)
+                //console.log("init render x", xkey, "z", zkey)
                 const key = chunkKey(xkey, zkey)
                 const id = chunkMap[key]
                 if (id === undefined || id === chunk_encoding.null) {
@@ -780,6 +782,35 @@ export class Chunks {
         const v = voxaddr(xdiff, inty, zdiff, voxelPtr)
         const type = voxelData[v]
         return type !== voxel.air
+    }
+
+    mutateVoxel(x: number, y: number, z: number, type: number) {
+        if (x < 0 || z < 0 || y < 0) {
+            return 403
+        } else if (y >= CHUNK_Y_DIM || x >= this.maxX || z >= this.maxZ) {
+            return 403
+        }
+        const intx = ~~(x)
+        const intz = ~~(z)
+        const inty = ~~(y)
+        const xdiff = (intx % CHUNK_X_DIM)
+        const zdiff = (intz % CHUNK_Z_DIM)
+        const xOffset = intx - xdiff
+        const zOffset = intz - zdiff
+        const key = chunkKey(xOffset, zOffset)
+        const chunkRef = this.chunkMap[key]
+        if (
+            chunkRef === undefined 
+            || chunkRef === chunk_encoding.null
+        ) {
+            return 404
+        }
+        const {voxelPtr, voxelData} = this.chunks[chunkRef]
+        const v = voxaddr(xdiff, inty, zdiff, voxelPtr)
+        console.log("vox", x, y, z, "is now", type)
+        voxelData[v] = type
+        this.dirtyChunks.push(chunkRef)
+        return 200
     }
 
     diffChunks(currentX: number, currentZ: number) {
@@ -877,14 +908,24 @@ export class Chunks {
                 this.nextZBoundary = boundPos(nextZ, CHUNK_Z_DIM)
                 break
             default:
-                console.log("no rebuilding neccessary")
+                //console.log("no rebuilding neccessary")
                 break
         }
 
-        const {simulationQueue, rebuildQueue, chunkMap} = this
+        const {
+            simulationQueue, 
+            rebuildQueue, 
+            chunkMap,
+            dirtyChunks
+        } = this
         // rebuild & render a maximum of one chunk
         // per frame.
-        if (simulationQueue.length > 0) {
+        if (dirtyChunks.length > 0) {
+            const last = dirtyChunks[dirtyChunks.length - 1]
+            const dirtyChunk = this.chunks[last]
+            dirtyChunk.render()
+            this.dirtyChunks.pop()
+        } else if (simulationQueue.length > 0) {
             const {oldKey, newKey} = simulationQueue[simulationQueue.length - 1]
             console.log("simulating", newKey, "in place of", oldKey)
             const chunkref = chunkMap[oldKey]

@@ -4,6 +4,22 @@ interface World {
     isVoxelSolid: (x: number, y: number, z: number) => boolean
 }
 
+export class Vec3 { x = 0.0; y = 0.0; z = 0.0 }
+
+export class CollisionInfo {
+    collided: boolean
+    normal: number
+    distanceTraveled: Vec3
+    distanceLeft: Vec3
+
+    constructor() {
+        this.collided = false
+        this.normal = 0
+        this.distanceTraveled = new Vec3()
+        this.distanceLeft = new Vec3()
+    }
+}
+
 export const enum axis {
     positive_x = 1,
     negative_x = -1,
@@ -32,7 +48,7 @@ const hypotenuse3d = (x: number, y: number, z: number) => Math.sqrt(x ** 2 + y *
  * @param distanceCap 
  * @returns 
  */
-/*
+
 export const sweepPoint = (
     position: Position,
     velocity: Velocity,
@@ -96,7 +112,7 @@ export const sweepPoint = (
     }
 
     let accumulatedDistance = 0.0
-    const stopDistance = maxDistance > distanceCap ? distanceCap : maxDistance
+    const stopDistance = Math.min(maxDistance, distanceCap)
     let currentAxis = axis.positive_x
     while (accumulatedDistance < stopDistance) {
         // set traversal details
@@ -117,39 +133,39 @@ export const sweepPoint = (
             currentAxis = axis.positive_z
         }
 
-        // check if voxel is solid, etc.
-        if (!world.isVoxelSolid(currentX, currentY, currentZ).active) {
+        if (!world.isVoxelSolid(currentX, currentY, currentZ)) {
             continue
         }
         
         const timeOfCollision = accumulatedDistance / maxDistance
         collisionRef.collided = true
-        collisionRef.position.x = position.x + distanceX * timeOfCollision
-        collisionRef.position.y = position.y + distanceY * timeOfCollision
-        collisionRef.position.z = position.z + distanceZ * timeOfCollision
+        const traveled = collisionRef.distanceTraveled
+        traveled.x = distanceX * timeOfCollision
+        traveled.y = distanceY * timeOfCollision
+        traveled.z = distanceZ * timeOfCollision
         switch (currentAxis) {
+            // negative normal means negative axis
             case axis.positive_x:
-                collisionRef.normal.x = xSignStep
-                collisionRef.normal.y = 0
-                collisionRef.normal.z = 0
+                collisionRef.normal = 1 * xSignStep
                 break
             case axis.positive_y:
-                collisionRef.normal.x = 0
-                collisionRef.normal.y = ySignStep
-                collisionRef.normal.z = 0
+                collisionRef.normal = 2 * ySignStep
                 break
             case axis.positive_z:
-                collisionRef.normal.x = 0
-                collisionRef.normal.y = 0
-                collisionRef.normal.z = zSignStep
+                collisionRef.normal = 3 * zSignStep
                 break
         }
         return collisionRef
     }
     collisionRef.collided = false
+    {
+        const traveled = collisionRef.distanceTraveled
+        traveled.x = distanceX
+        traveled.y = distanceY
+        traveled.z = distanceZ
+    }
     return collisionRef
 }
-*/
 
 const TRUNCATION_MARGIN_OF_ERROR =  1e-10
 const leadEdgeToInt = (lead: number, signStep: number) => Math.floor(lead - signStep * TRUNCATION_MARGIN_OF_ERROR)
@@ -157,22 +173,6 @@ const trailEdgeToInt = (trail: number, signStep: number) => Math.floor(trail + s
 
 type Transform = { x: number, y: number, z: number }
 type BoundingBoxDimensions = { x: number, y: number, z: number }
-
-export class Vec3 { x = 0.0; y = 0.0; z = 0.0 }
-
-class CollisionInfo {
-    collided: boolean
-    normal: number
-    distanceTraveled: Vec3
-    distanceLeft: Vec3
-
-    constructor() {
-        this.collided = false
-        this.normal = 0
-        this.distanceTraveled = new Vec3()
-        this.distanceLeft = new Vec3()
-    }
-}
 
 /**
  * Check if bounding box collides with world.
