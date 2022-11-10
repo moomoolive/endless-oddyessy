@@ -96,7 +96,8 @@ const main = async () => {
         cameraDown: false,
         cameraZoomIn: false,
         cameraZoomOut: false,
-        interact: false
+        interact: false,
+        invertTool: false,
     }
 
     window.addEventListener("keydown", (e) => {
@@ -118,6 +119,9 @@ const main = async () => {
                 break
             case "q":
                 controller.interact = true
+                break
+            case "z":
+                controller.invertTool = true
                 break
             case " ":
                 controller.up = true
@@ -144,6 +148,9 @@ const main = async () => {
                 break
             case "q":
                 controller.interact = false
+                break
+            case "z":
+                controller.invertTool = false
                 break
             case " ":
                 controller.up = false
@@ -237,7 +244,11 @@ const main = async () => {
 
     const editingToolEntity = {
         selectedType: 1,
-        focus: {x: 0.0, y: 0.0, z: 0.0}
+        focus: {x: 0.0, y: 0.0, z: 0.0},
+        mode: "create",
+        debounce: 0,
+        invertToolDebounce: 0,
+        cachedType: 0,
     }
 
     const editMaterial = new StandardMaterial("EditBoxMaterial", scene)
@@ -247,16 +258,32 @@ const main = async () => {
         width: 1.02, height: 1.02, depth: 1.02,
         updatable: true,
         faceColors: [
-            new Color4(0, 1, 0, 1.0),
-            new Color4(0, 1, 0, 1.0),
-            new Color4(0, 1, 0, 1.0),
-            new Color4(0, 1, 0, 1.0),
-            new Color4(0, 1, 0, 1.0),
-            new Color4(0, 1, 0, 1.0),
+            new Color4(1.0, 1.0, 0, 1.0),
+            new Color4(1.0, 1.0, 0, 1.0),
+            new Color4(1.0, 1.0, 0, 1.0),
+            new Color4(1.0, 1.0, 0, 1.0),
+            new Color4(1.0, 1.0, 0, 1.0),
+            new Color4(1.0, 1.0, 0, 1.0),
         ]
     }, scene)
     editingBlock.position.set(46.0, 50.5, 200.0)
     editingBlock.material = editMaterial
+
+    const deleteTool = CreateBox("deleteTool", {
+        width: 1.1, height: 1.1, depth: 1.1,
+        updatable: true,
+        faceColors: [
+            new Color4(1.0, 0.0, 0.0, 1.0),
+            new Color4(1.0, 0.0, 0.0, 1.0),
+            new Color4(1.0, 0.0, 0.0, 1.0),
+            new Color4(1.0, 0.0, 0.0, 1.0),
+            new Color4(1.0, 0.0, 0.0, 1.0),
+            new Color4(1.0, 0.0, 0.0, 1.0),
+        ]
+    }, scene)
+    deleteTool.position.set(46.0, 50.5, 200.0)
+    deleteTool.material = editMaterial
+    deleteTool.setEnabled(false)
 
     const editingBlockRayCast = new CollisionInfo()
     engine.runRenderLoop(() => {
@@ -491,9 +518,9 @@ const main = async () => {
             player.position.y = playerEntity.position.y
 
             // debug
-            boxCollider.position.x = playerEntity.position.x
-            boxCollider.position.y = playerEntity.position.y
-            boxCollider.position.z = playerEntity.position.z
+            //boxCollider.position.x = playerEntity.position.x
+            //boxCollider.position.y = playerEntity.position.y
+            //boxCollider.position.z = playerEntity.position.z
         }
 
         // update block tool
@@ -501,13 +528,9 @@ const main = async () => {
             const {x, y, z} = playerEntity.position
             const xbias = 1.5
             const ybias = 0.5
-            
-            editingBlock.position.x = x + xbias
-            editingBlock.position.y = y - ybias
-            editingBlock.position.z = z
 
             // camera vertical angle
-            const yspeed = Math.cos(Math.PI - camera.beta)
+            //const yspeed = Math.cos(Math.PI - camera.beta)
             const horizontalAngle = Math.cos(Math.PI - camera.alpha)
             const verticalAngle = Math.sin(Math.PI * 2 - camera.alpha)
             
@@ -516,7 +539,7 @@ const main = async () => {
                 position,
                 {
                     x: horizontalAngle * 10, 
-                    y: yspeed * 10, 
+                    y: 0,
                     z: verticalAngle * 10
                 },
                 chunkManager,
@@ -525,71 +548,87 @@ const main = async () => {
                 editingBlockRayCast
             )
 
-            if (res.collided) {
-                const {distanceTraveled, normal} = res
-                const x = ~~(position.x + distanceTraveled.x)
-                const y = ~~(position.y + distanceTraveled.y)
-                const z = ~~(position.z + distanceTraveled.y)
-                const topIsBlocked = chunkManager.isVoxelSolid(
-                    x, y + 1, z
-                )
-                //console.log(
-                //    "collided", x, y, z, "norm", normal,
-                //    "top is blocked", topIsBlocked
-                //)
-                const pos = editingBlock.position
-                
-                if (
-                    !topIsBlocked
-                    && (pos.x !== x || pos.y !== y || pos.z !== z)
-                ) {
-                    //editingBlock.position.set(x + 0.5, y + 1.5, z + 0.5)
-                    switch (normal) {
-                        case 3:
-                            editingBlock.position.set(x + 0.5, y + 1.5, z + 1.5)
-                            break
-                        case -3:
-                            editingBlock.position.set(x + 0.5, y + 1.5, z - 0.5)
-                            break
-                        case 2:
-                            editingBlock.position.set(x + 0.5, y - 1.5, z + 0.5)
-                            break
-                        case -2:
-                            editingBlock.position.set(x + 0.5, y + 1.5, z + 0.5)
-                            break
-                        case 1:
-                            editingBlock.position.set(x + 0.5, y + 1.5, z + 0.5)
-                            break
-                        case -1:
-                            editingBlock.position.set(x - 0.5, y + 1.5, z + 0.5)
-                            break
-                    }
-                    editingToolEntity.focus.x = editingBlock.position.x
-                    editingToolEntity.focus.y = editingBlock.position.y
-                    editingToolEntity.focus.z = editingBlock.position.z
+            if (controller.invertTool && Date.now() > editingToolEntity.invertToolDebounce) {
+                const deleteMode = editingToolEntity.mode === "create"
+                if (deleteMode) {
+                    editingToolEntity.mode = "delete"
+                    deleteTool.setEnabled(true)
+                    editingBlock.setEnabled(false)
+                    editingToolEntity.cachedType = editingToolEntity.selectedType
+                    editingToolEntity.selectedType = 0
+                } else {
+                    editingToolEntity.mode = "create"
+                    deleteTool.setEnabled(false)
+                    editingBlock.setEnabled(true)
+                    editingToolEntity.selectedType = editingToolEntity.cachedType
                 }
-            } else {
-                const {distanceTraveled} = res
-                const x = ~~(position.x + distanceTraveled.x)
-                const y = ~~(position.y + distanceTraveled.y)
-                const z = ~~(position.z + distanceTraveled.z)
-                //console.log("edit", x, y, z)
-                editingBlock.position.set(
-                    x + (distanceTraveled.x < 0 && distanceTraveled.x > distanceTraveled.z ? -0.0 : 0.5), 
-                    y + 0.5,
-                    z + (distanceTraveled.z < 0 && distanceTraveled.z > distanceTraveled.x ? -0.0: 0.5)
-                )
-                editingToolEntity.focus.x = x
-                editingToolEntity.focus.y = y
-                editingToolEntity.focus.z = z
-                if (controller.interact) {
-                    chunkManager.mutateVoxel(x, y, z, 1)
-                }
+
+                editingToolEntity.invertToolDebounce = Date.now() + 500
             }
 
-            if (controller.interact) {
-                const {focus: {x, y, z}, selectedType} = editingToolEntity
-                chunkManager.mutateVoxel(x, y, z, selectedType)
+            if (editingToolEntity.mode === "create") {
+                editingBlock.position.x = x + xbias
+                editingBlock.position.y = y - ybias
+                editingBlock.position.z = z
+                if (res.collided) {
+                    editingBlock.setEnabled(false)
+                } else {
+                    const {distanceTraveled} = res
+                    const x = ~~(position.x + distanceTraveled.x)
+                    const y = ~~(position.y + distanceTraveled.y)
+                    const z = ~~(position.z + distanceTraveled.z)
+                    //console.log("edit", x, y, z)
+                    editingBlock.position.set(
+                        x + (distanceTraveled.x < 0 && distanceTraveled.x > distanceTraveled.z ? -0.0 : 0.5), 
+                        y - 0.5,
+                        z + (distanceTraveled.z < 0 && distanceTraveled.z > distanceTraveled.x ? -0.0: 0.5)
+                    )
+                    editingToolEntity.focus.x = x
+                    editingToolEntity.focus.y = y
+                    editingToolEntity.focus.z = z
+                    editingBlock.setEnabled(true)
+                }
+                
+                const now = Date.now()
+                if (
+                    controller.interact &&
+                    now > editingToolEntity.debounce
+                ) {
+                    const {focus: {x, y, z}, selectedType} = editingToolEntity
+                    chunkManager.mutateVoxel(x, y - 1, z, selectedType)
+                    editingToolEntity.debounce = now + 100
+                }
+            } else if (editingToolEntity.mode === "delete") {
+                editingBlock.position.x = x
+                editingBlock.position.y = y
+                editingBlock.position.z = z
+                if (res.collided) {
+                    const {distanceTraveled} = res
+                    const x = ~~(position.x + distanceTraveled.x)
+                    const y = ~~(position.y + distanceTraveled.y)
+                    const z = ~~(position.z + distanceTraveled.z)
+                    deleteTool.position.set(
+                        x - 0.5, 
+                        y - 0.5,
+                        z - 0.5
+                    )
+                    editingToolEntity.focus.x = x + 1.5
+                    editingToolEntity.focus.y = y - 1
+                    editingToolEntity.focus.z = z + 1.5
+                    deleteTool.setEnabled(true)
+                } else {
+                    deleteTool.setEnabled(false)
+                }
+                
+                const now = Date.now()
+                if (
+                    controller.interact &&
+                    now > editingToolEntity.debounce
+                ) {
+                    const {focus: {x, y, z}, selectedType} = editingToolEntity
+                    chunkManager.mutateVoxel(x, y, z, selectedType)
+                    editingToolEntity.debounce = now + 100
+                }
             }
 
         }

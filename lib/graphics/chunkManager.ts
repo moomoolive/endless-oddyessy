@@ -15,7 +15,7 @@ const noise1 = createNoise2D(alea("seed1"))
  * @param {number} exponentiation controls the general height of terrain
  * @returns {number}
  */
- const fractionalBMotion = (
+export const fractionalBMotion = (
     noiseFn = noise1,
     x: number,
     y: number,
@@ -64,7 +64,7 @@ const beachLevel = oceanLevel + 4
 const snowLevel = ~~(CHUNK_Y_DIM * 0.67)
 const mountainLevel = ~~(CHUNK_Y_DIM * 0.48)
 
-const biome = (elevation: number, moisture: number) => {
+export const biome = (elevation: number, moisture: number) => {
     if (elevation < beachLevel) {
         return voxel.sand
     } else if (elevation > snowLevel) {
@@ -807,7 +807,7 @@ export class Chunks {
         }
         const {voxelPtr, voxelData} = this.chunks[chunkRef]
         const v = voxaddr(xdiff, inty, zdiff, voxelPtr)
-        console.log("vox", x, y, z, "is now", type)
+        console.log("vox", x, y, z, "is now", type, "prev", voxelData[v])
         voxelData[v] = type
         this.dirtyChunks.push(chunkRef)
         return 200
@@ -923,6 +923,7 @@ export class Chunks {
         if (dirtyChunks.length > 0) {
             const last = dirtyChunks[dirtyChunks.length - 1]
             const dirtyChunk = this.chunks[last]
+            console.log("rendering dirty chunks")
             dirtyChunk.render()
             this.dirtyChunks.pop()
         } else if (simulationQueue.length > 0) {
