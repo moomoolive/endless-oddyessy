@@ -383,6 +383,7 @@ export class TerrainChunk {
     destroyMesh() {
         const name = this.mesh.name
         this.mesh.dispose()
+        this.isRendered = false
         this.mesh = new Mesh(name)
     }
 }

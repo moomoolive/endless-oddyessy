@@ -27,6 +27,7 @@ import {
     lerp, toRadians, toDegrees, fpEqual, 
     createAxisRotation
 } from "./lib/math/index"
+import {TerrainManager} from "./lib/graphics/terrainManager"
 
 const deceleration = new Vector3(-10.0, -0.0001, -10.0)
 
@@ -190,12 +191,12 @@ const main = async () => {
     }
 
     canvas.onclick  = () => canvas.requestPointerLock()
-
-    const chunkManager = new Chunks({
-        renderDistance: 4,
-        maxChunksX: 14,
-        maxChunksZ: 14
-    })
+    
+    //const chunkManager = new Chunks({
+    //    renderDistance: 4,
+    //    maxChunksX: 14,
+    //    maxChunksZ: 14
+    //})
 
     const playerEntity = {
         transform: {x: 0.0, y: 0.0, z: 0.0},
@@ -204,15 +205,24 @@ const main = async () => {
         kinematics: {mass: 10.0, gravityModifier: 1.0},
         velocity: {x: 0.0, y: 0.0, z: 0.0},
         acceleration: {x: 600.0, y: 0.25, z: 600.0},
-        position: {x: 45.0, y: 100.0, z: 200.0},
+        position: {x: 120.0, y: 100.0, z: 120.0},
         rendering: {id: 0},
     }
+    const chunkManager = new TerrainManager({})
     {
         const {x, z} = playerEntity.position
-        if (!chunkManager.init(x, z)) {
-            console.warn("chunk generator failed to execute")
+        chunkManager.diffChunks(x, z)
+        while (chunkManager.hasTasks()) {
+            chunkManager.execPendingTask()
         }
     }
+
+    //{
+    //    const {x, z} = playerEntity.position
+    //    if (!chunkManager.init(x, z)) {
+    //        console.warn("chunk generator failed to execute")
+    //    }
+    //}
 
     const p = await playerModelPromise
     const player = p.meshes[0] as Mesh
@@ -270,20 +280,20 @@ const main = async () => {
     editingBlock.material = editMaterial
 
     const deleteTool = CreateBox("deleteTool", {
-        width: 1.1, height: 1.1, depth: 1.1,
+        width: 4_096, height: 19.25, depth: 4_096,
         updatable: true,
         faceColors: [
-            new Color4(1.0, 0.0, 0.0, 1.0),
-            new Color4(1.0, 0.0, 0.0, 1.0),
-            new Color4(1.0, 0.0, 0.0, 1.0),
-            new Color4(1.0, 0.0, 0.0, 1.0),
-            new Color4(1.0, 0.0, 0.0, 1.0),
-            new Color4(1.0, 0.0, 0.0, 1.0),
+            new Color4(0.0, 0.0, 1.0, 1.0),
+            new Color4(0.0, 0.0, 1.0, 1.0),
+            new Color4(0.0, 0.0, 1.0, 1.0),
+            new Color4(0.0, 0.0, 1.0, 1.0),
+            new Color4(0.0, 0.0, 1.0, 1.0),
+            new Color4(0.0, 0.0, 1.0, 1.0),
         ]
     }, scene)
-    deleteTool.position.set(46.0, 50.5, 200.0)
+    deleteTool.position.set(0.0, 20.0, 0.0)
     deleteTool.material = editMaterial
-    deleteTool.setEnabled(false)
+    deleteTool.setEnabled(true)
 
     const editingBlockRayCast = new CollisionInfo()
     engine.runRenderLoop(() => {
@@ -465,6 +475,7 @@ const main = async () => {
             velocity.z += impulse.z / kinematics.mass
 
             // reset forces for next frame
+            
             impulse.x = impulse.y = impulse.z = 0.0
 
             const res = sweepBoxCollisions(
@@ -481,6 +492,7 @@ const main = async () => {
             playerEntity.transform.y = transform.y
             playerEntity.transform.z = transform.z
 
+            /*
             if (res.touchedX) {
                 const stoppingImpulse = kinematics.mass * - velocity.x
                 impulse.x += stoppingImpulse
@@ -501,6 +513,7 @@ const main = async () => {
                 const stoppingImpulse = kinematics.mass * - velocity.z
                 impulse.z += stoppingImpulse
             }
+            */
         }
 
         // apply transforms
@@ -524,6 +537,7 @@ const main = async () => {
         }
 
         // update block tool
+        /*
         {
             const {x, y, z} = playerEntity.position
             const xbias = 1.5
@@ -632,10 +646,12 @@ const main = async () => {
             }
 
         }
+        */
 
         {
             const {x, z} = player.position
             chunkManager.diffChunks(x, z)
+            chunkManager.execPendingTask()
         }
 
         // render world

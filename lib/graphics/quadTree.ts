@@ -13,9 +13,11 @@ export class Vec2 {
     distanceTo(comparison: Vec2) {
         const {x: cmpx, z: cmpz} = comparison
         const {x, z} = this
-        const distancex = Math.abs(x) - Math.abs(cmpx)
-        const distancez = Math.abs(z) - Math.abs(cmpz)
-        return Math.sqrt(distancex ** 2 + distancez ** 2)
+        return Math.sqrt((x - cmpx) ** 2 + (z - cmpz) ** 2)
+    }
+
+    clone() {
+        return new Vec2(this.x, this.z)
     }
 }
 
@@ -30,14 +32,16 @@ export class Box2 {
 
     center() {
         const {min, max} = this
-        const midx = (max.x - min.x) / 2
-        const midz = (max.z - max.x) / 2
-        return new Vec2(midx, midz)
+        const diffx = (max.x - min.x) / 2
+        const diffz = (max.z - min.z) / 2
+        return new Vec2(min.x + diffx, min.z + diffz)
     }
 
     size() {
         const {min, max} = this
-        return new Vec2(max.x - min.x, max.z - min.z)
+        const x = Math.abs(max.x - min.x)
+        const z = Math.abs(max.z - min.z)
+        return new Vec2(x, z)
     }
 }
 
@@ -58,7 +62,6 @@ class Node {
     }
 }
 
-// impl: min 0,0 | max 4096, 4096
 export class Quadtree {
     root: Node
     minNodeSize: number
@@ -73,24 +76,34 @@ export class Quadtree {
     }
 
     insert(camera: Vec2) {
-        return this.recursivelyInsert(this.root, camera, this.minNodeSize)
+        return this.recursivelyInsert(
+            this.root, camera, this.minNodeSize, 1
+        )
     }
 
-    private recursivelyInsert(child: Node, camera: Vec2, minNodeSize: number) {
+    private recursivelyInsert(
+        child: Node, 
+        camera: Vec2, 
+        minNodeSize: number,
+        depth: number
+    ) {
         const distanceToChild = child.center.distanceTo(camera)
         if (distanceToChild < child.size.x && child.size.x > minNodeSize) {
             const children = this.createChildren(child)
-            for (const c of children) {
-                this.recursivelyInsert(c, camera, minNodeSize)
+            for (const newChild of children) {
+                this.recursivelyInsert(
+                    newChild, camera, minNodeSize, depth + 1
+                )
             }
         }
-        return this
     }
 
     private createChildren(child: Node) {
-        const midpoint = child.center
-
-        const bottomLeft = new Box2(child.bounds.min, midpoint)
+        const midpoint = child.center.clone()
+        const bottomLeft = new Box2(
+            child.bounds.min, 
+            midpoint
+        )
         const bottomRight = new Box2(
             new Vec2(midpoint.x, child.bounds.min.z),
             new Vec2(child.bounds.max.x, midpoint.z)
@@ -99,7 +112,10 @@ export class Quadtree {
             new Vec2(child.bounds.min.x, midpoint.z),
             new Vec2(midpoint.x, child.bounds.max.z)
         )
-        const topRight = new Box2(midpoint, child.bounds.max)
+        const topRight = new Box2(
+            midpoint, 
+            child.bounds.max
+        )
         child.children.push(
             new Node(topLeft), new Node(topRight),
             new Node(bottomLeft), new Node(bottomRight)
@@ -114,7 +130,7 @@ export class Quadtree {
     }
 
     private recursivelyGetLeafNodes(child: Node, output: Node[]) {
-        if (child.children.length < 1) {
+        if (child.children.length < 1 && child.size.x < this.minNodeSize * 4 + 1) {
             output.push(child)
             return
         }
