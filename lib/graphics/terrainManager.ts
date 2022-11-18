@@ -2,7 +2,7 @@ import {Quadtree, Vec2, Box2} from "./quadTree"
 import {fractionalBMotion, biome, voxel} from "./chunkManager"
 import {createNoise2D} from "simplex-noise"
 import alea from "alea"
-import {VertexData, Mesh, StandardMaterial} from "babylonjs"
+import {VertexData, Mesh, StandardMaterial, Color3} from "babylonjs"
 
 const noise1 = createNoise2D(alea("seed1"))
 
@@ -69,7 +69,7 @@ const ensureVertexExist = (
     }
 }
 
-const createTerrainGeometry = (
+const culledQuad = (
     indices: number[],
     vertices: number[],
     colors: number[],
@@ -96,97 +96,6 @@ const createTerrainGeometry = (
     ) {
         return
     }
-
-    const b = vertices.length / 3
-
-    /*
-    switch(voxelType) {
-        case voxel.grass:
-            colors.push(
-                0.45, 1, 0.45, 1,
-                0.45, 1, 0.45, 1,
-                0.45, 1, 0.45, 1,
-                0.45, 1, 0.45, 1,
-                0.45, 1, 0.45, 1,
-                0.45, 1, 0.45, 1,
-                0.45, 1, 0.45, 1,
-                0.45, 1, 0.45, 1,
-            )
-            break
-        case voxel.water:
-            colors.push(
-                0.3, 0.3, 1, 1,
-                0.3, 0.3, 1, 1,
-                0.3, 0.3, 1, 1,
-                0.3, 0.3, 1, 1,
-                0.3, 0.3, 1, 1,
-                0.3, 0.3, 1, 1,
-                0.3, 0.3, 1, 1,
-                0.3, 0.3, 1, 1,
-            )
-            break
-        case voxel.dirt:
-            colors.push(
-                0.55, 0.15, 0.08, 1,
-                0.55, 0.15, 0.08, 1,
-                0.55, 0.15, 0.08, 1,
-                0.55, 0.15, 0.08, 1,
-                0.55, 0.15, 0.08, 1,
-                0.55, 0.15, 0.08, 1,
-                0.55, 0.15, 0.08, 1,
-                0.55, 0.15, 0.08, 1,
-            )
-            break
-        case voxel.stone:
-            colors.push(
-                0.8, 0.8, 0.8, 1,
-                0.8, 0.8, 0.8, 1,
-                0.8, 0.8, 0.8, 1,
-                0.8, 0.8, 0.8, 1,
-                0.8, 0.8, 0.8, 1,
-                0.8, 0.8, 0.8, 1,
-                0.8, 0.8, 0.8, 1,
-                0.8, 0.8, 0.8, 1,
-            )
-            break
-        case voxel.snow:
-            colors.push(
-                1.0, 1.0, 1.0, 1,
-                1.0, 1.0, 1.0, 1,
-                1.0, 1.0, 1.0, 1,
-                1.0, 1.0, 1.0, 1,
-                1.0, 1.0, 1.0, 1,
-                1.0, 1.0, 1.0, 1,
-                1.0, 1.0, 1.0, 1,
-                1.0, 1.0, 1.0, 1,
-            )
-            break
-        case voxel.sand:
-            colors.push(
-                0.9, 0.87, 0.65, 1,
-                0.9, 0.87, 0.65, 1,
-                0.9, 0.87, 0.65, 1,
-                0.9, 0.87, 0.65, 1,
-                0.9, 0.87, 0.65, 1,
-                0.9, 0.87, 0.65, 1,
-                0.9, 0.87, 0.65, 1,
-                0.9, 0.87, 0.65, 1,
-            )
-            break
-        default:
-            colors.push(
-                0, 1, 0, 1,
-                0, 1, 0, 1,
-                0, 1, 0, 1,
-                0, 1, 0, 1,
-                0, 1, 0, 1,
-                0, 1, 0, 1,
-                0, 1, 0, 1,
-                0, 1, 0, 1,
-            )
-            break
-    }
-    */
 
     /*
     vertexMap reference (pretty fancy eh?)
@@ -378,10 +287,6 @@ const greedyQuad = (
     let mainAxisEnd = mainAxisStart + 1
     let altAxisEnd = altAxisStart + 1
     const faceCheckOffset = positiveAxis ? 1 : -1
-    const axisConstant = positiveAxis ? 1 : 0
-    const altRealCoord = altGlobalCoord
-    const tertiaryRealCoord = tertiaryGlobalCoord + axisConstant
-    const mainRealCoord = mainGlobalCoord
 
     const iter = [0, 0, 0] as [number, number, number]
     iter[altAxis] = altAxisStart
@@ -449,12 +354,21 @@ const greedyQuad = (
     }
 
     const vStart = vertices.length / 3                    
-    const minAlt = altRealCoord
-    const minTertiary = tertiaryRealCoord
-    const minMain = mainRealCoord
-    const maxAlt = altRealCoord + (altAxisEnd - altAxisStart) * lodFactor
-    const maxTertiary = minTertiary
-    const maxMain = mainRealCoord + (mainAxisEnd - mainAxisStart) * lodFactor
+    const minAlt = altGlobalCoord
+    const axisConstant = positiveAxis ? 1 : 0
+    let minTertiary = tertiaryGlobalCoord
+    const minMain = mainGlobalCoord
+    const maxAlt = minAlt + (altAxisEnd - altAxisStart) * lodFactor
+    let maxTertiary = 0
+    let maxMain = minMain
+    if (mainAxis === 1) {
+        minTertiary += lodFactor * axisConstant
+        maxMain += (mainAxisEnd - mainAxisStart)
+    } else {
+        minTertiary += axisConstant
+        maxMain += (mainAxisEnd - mainAxisStart) * lodFactor
+    }
+    maxTertiary = minTertiary
     iter[altAxis] = minAlt
     iter[tertiaryAxis] = minTertiary
     iter[mainAxis] = minMain
@@ -619,7 +533,7 @@ const createColor = (
             vertexColors(0.0, 1.0, 0.0, vertexCount, colors)
             break
         case 2:
-            vertexColors(0.0, 0.0, 1.0, vertexCount, colors)
+            vertexColors(1.0, 0.0, 1.0, vertexCount, colors)
             break
         case 3:
             vertexColors(1.0, 0.0, 0.0, vertexCount, colors)
@@ -643,6 +557,11 @@ class Chunk {
     vertexData: VertexData
     mesh: Mesh
     isRendered: boolean
+    simulationDelta: number 
+    meshingDelta: number
+    vertexCount: number
+    faceCount: number
+    mostRecentSimulationRendered: boolean
     
     constructor({
         center = new Vec2(),
@@ -652,6 +571,8 @@ class Chunk {
         key = "0.0[16]",
         id = "terrain-chunk-1",
     } = {}) {
+        this.faceCount = 0
+        this.vertexCount = 0
         this.key = key
         this.center = center
         this.bounds = bounds
@@ -662,9 +583,13 @@ class Chunk {
         this.vertexData = new VertexData()
         this.mesh = new Mesh(id)
         this.isRendered = false
+        this.mostRecentSimulationRendered = false
+        this.simulationDelta = 0.0
+        this.meshingDelta = 0.0
     }
 
     simulate() {
+        const start = Date.now()
         this.levelOfDetail = Math.max(this.levelOfDetail, 1)
         const {levelOfDetail, voxelBuffer} = this
         const originx = this.bounds.min.x
@@ -692,9 +617,11 @@ class Chunk {
                 }
             }
         }
+        this.simulationDelta = Date.now() - start
+        this.mostRecentSimulationRendered = false
     }
 
-    culledRender() {
+    culledMesh() {
         const start = Date.now()
         const {levelOfDetail, voxelBuffer} = this
         const originx = this.bounds.min.x
@@ -741,7 +668,7 @@ class Chunk {
                         ? false//!this.globalRef.isVoxelSolid(xGlobal, y, zGlobal + 1)
                         : voxelBuffer[voxaddr(x, y, z + 1, ptr)] === voxel.air
                     
-                    createTerrainGeometry(
+                    culledQuad(
                         indices, vertices, colors,
                         renderNegativeY, renderPositiveY,
                         renderNegativeX, renderPositiveX,
@@ -756,12 +683,16 @@ class Chunk {
         vd.indices = indices
         vd.positions = vertices
         vd.colors = colors
-        console.info("culled render took:", Date.now() - start, "ms. vs:", vertices.length.toLocaleString())
         vd.applyToMesh(mesh, true)
         this.isRendered = true
+        this.vertexCount = vertices.length / 3
+        this.faceCount = indices.length / 3
+        this.mostRecentSimulationRendered = true
+        this.meshingDelta = Date.now() - start
+        console.info("greedy mesh took", this.meshingDelta, "ms, sim took", this.simulationDelta, "ms. vs:", this.vertexCount.toLocaleString("en-us"))
     }
 
-    greedyRender() {
+    greedyMesh({wireframe = false} = {}) {
         const start = Date.now()
         const {levelOfDetail, voxelBuffer} = this
         const originx = this.bounds.min.x
@@ -1026,15 +957,21 @@ class Chunk {
         const {vertexData: vd, mesh} = this
         vd.indices = indices
         vd.positions = vertices
-        vd.colors = colors
-        const mat = new StandardMaterial("wireframe" + Date.now())
-        //mat.emissiveColor = Color3.White()
-        mat.wireframe = true
+        if (wireframe) {
+            const mat = new StandardMaterial("wireframe" + Date.now())
+            mat.emissiveColor = Color3.White()
+            mat.wireframe = true
+            mesh.material = mat
+        } else {
+            vd.colors = colors
+        }
         vd.applyToMesh(mesh, true)
-        //mesh.material = mat
-        console.info("greedy render took:", Date.now() - start, "ms. vs:", vertices.length.toLocaleString())
-        //mesh.occlusionType = AbstractMesh.OCCLUSION_TYPE_OPTIMISTIC
         this.isRendered = true
+        this.vertexCount = vertices.length / 3
+        this.faceCount = indices.length / 3
+        this.mostRecentSimulationRendered = true
+        this.meshingDelta = Date.now() - start
+        console.info("greedy mesh took", this.meshingDelta, "ms, sim took", this.simulationDelta, "ms. vs:", this.vertexCount.toLocaleString("en-us"))
     }
 
     destroyMesh() {
@@ -1158,11 +1095,19 @@ export class TerrainManager {
         const chunkref = this.rebuildChunks.pop()!
         const chunk = this.chunks[chunkref]
         chunk.simulate()
-        chunk.greedyRender()
+        chunk.greedyMesh({wireframe: false})
         return true
     }
 
     isVoxelSolid(x: number, y: number, z: number) {
         return false
+    }
+
+    vertexCount() {
+        return this.chunks.reduce((total, {vertexCount}) => total + vertexCount, 0)
+    }
+
+    faceCount() {
+        return this.chunks.reduce((total, {faceCount}) => total + faceCount, 0)
     }
 }

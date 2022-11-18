@@ -215,6 +215,7 @@ const main = async () => {
         while (chunkManager.hasTasks()) {
             chunkManager.execPendingTask()
         }
+        console.info("[stats]: total vertices", chunkManager.vertexCount().toLocaleString("en-us"))
     }
 
     //{
