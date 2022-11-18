@@ -2,7 +2,7 @@ import {Quadtree, Vec2, Box2} from "./quadTree"
 import {fractionalBMotion, biome, voxel} from "./chunkManager"
 import {createNoise2D} from "simplex-noise"
 import alea from "alea"
-import {VertexData, Mesh, StandardMaterial, Color3} from "babylonjs"
+import {VertexData, Mesh, StandardMaterial} from "babylonjs"
 
 const noise1 = createNoise2D(alea("seed1"))
 
@@ -351,69 +351,85 @@ const skipFactor = (levelOfDetail: number) => (2 ** (baseLod + levelOfDetail - 1
 
 const visitedIndex = (x: number, y: number, z: number) => x * CHUNK_Z_DIMENSION * CHUNK_Y_DIMENSION + z * CHUNK_Y_DIMENSION + y
 
-type Vbuffer = Int32Array
-
-const createGreedyQuad = (
-    voxelBuffer: Vbuffer,
-    visitedMarker: Uint8Array,
-    axisFlag: number,
-    mainGlobal: number,
-    altGlobal: number,
-    tertiaryGlobal: number,
-    skFactor: number,
-    coordinates: [number, number, number],
-    mainAxis: 0 | 1 | 2,
-    altAxis: 0 | 1 | 2,
-    tertiaryAxis: 0 | 1 | 2,
-    negativeAxis: boolean,
+type VoxelBuffer = Int32Array
+type AxisRef = 0 | 1 | 2
+const greedyQuad = (
+    mainAxis: AxisRef,
+    mainAxisStart: number,
     mainAxisLimit: number,
+    mainGlobalCoord: number,
+    altAxis: AxisRef,
+    altAxisStart: number,
     altAxisLimit: number,
-    bufferPtr: number,
+    altGlobalCoord: number,
+    tertiaryAxis: AxisRef,
+    tertiaryAxisStart: number,
+    teritaryAxisLimit: number,
+    tertiaryGlobalCoord: number,
+    vbuf: VoxelBuffer,
+    vptr: number,
+    visitedArr: Uint8Array,
     targetType: number,
+    positiveAxis: boolean,
+    axisFlag: number,
+    lodFactor: number,
     vertices: number[]
 ) => {
-    const mainStart = coordinates[mainAxis]
-    let mainEnd = mainStart + 1
-    const altStart = coordinates[altAxis]
-    let altEnd = altStart + 1
-    const axisMultiplier = negativeAxis ? -1 : 1
-    const iter = [...coordinates] as typeof coordinates
-    while (mainEnd < mainAxisLimit) {
-        iter[mainAxis] = mainEnd
-        iter[altAxis] = coordinates[altAxis]
-        const typeAddress = voxaddr(...iter, bufferPtr)
-        const candidateType = voxelBuffer[typeAddress]
-        const visited = visitedIndex(...iter)
-        const hasBeenVisited = visitedMarker[visited] & axisFlag
-        iter[altAxis] += axisMultiplier
-        const renderAddress = voxaddr(...iter, bufferPtr)
-        const isRenderable = voxelBuffer[renderAddress]
+    let mainAxisEnd = mainAxisStart + 1
+    let altAxisEnd = altAxisStart + 1
+    const faceCheckOffset = positiveAxis ? 1 : -1
+    const axisConstant = positiveAxis ? 1 : 0
+    const altRealCoord = altGlobalCoord
+    const tertiaryRealCoord = tertiaryGlobalCoord + axisConstant
+    const mainRealCoord = mainGlobalCoord
+
+    const iter = [0, 0, 0] as [number, number, number]
+    iter[altAxis] = altAxisStart
+    iter[tertiaryAxis] = tertiaryAxisStart
+    iter[mainAxis] = mainAxisEnd
+    const face = [...iter] as typeof iter
+    face[tertiaryAxis] = tertiaryAxisStart + faceCheckOffset
+    while (mainAxisEnd < mainAxisLimit) {
+        iter[mainAxis] = mainAxisEnd
+        const vIdx = visitedIndex(...iter)
+        face[mainAxis] = mainAxisEnd
+        const visited = visitedArr[vIdx] & axisFlag
         if (
-            candidateType !== targetType 
-            || !isRenderable
-            || hasBeenVisited
+            visited
+            // next voxel is not same type
+            || vbuf[voxaddr(...iter, vptr)] !== targetType 
+            // next voxel does not have same exposed face
+            || !(tertiaryAxisStart > teritaryAxisLimit - 2
+                ? true
+                : vbuf[voxaddr(...face, vptr)] === voxel.air)
         ) {
             break
         }
-        visitedMarker[visited] |= axisFlag
+        visitedArr[vIdx] |= axisFlag
+        mainAxisEnd++
     }
 
     let loop = true
-    while (altEnd < altAxisLimit && loop) {
-        for (let g = mainStart; g < mainEnd; g++) {
-            iter[mainAxis] = g
-            iter[altAxis] = altEnd
-            const candidate = voxaddr(...iter, bufferPtr)
-            const candidateType = voxelBuffer[candidate]
-            const visited = visitedIndex(...iter)
-            const hasBeenVisited = visitedMarker[visited] & axisFlag
-            iter[altAxis] += axisMultiplier
-            const render = voxaddr(...iter, bufferPtr)
-            const isRenderable = voxelBuffer[render]
+    while (altAxisEnd < altAxisLimit) {
+        const start = mainAxisStart
+        const end = mainAxisEnd
+        iter[altAxis] = altAxisEnd
+        iter[tertiaryAxis] = tertiaryAxisStart
+        face[altAxis] = altAxisEnd
+        face[tertiaryAxis] = tertiaryAxisStart + faceCheckOffset
+        for (let main = start; main < end; main++) {
+            iter[mainAxis] = main
+            const vIdx = visitedIndex(...iter)
+            const visited = visitedArr[vIdx] & axisFlag
+            face[mainAxis] = main
             if (
-                candidateType !== targetType 
-                || !isRenderable
-                || hasBeenVisited
+                visited
+                // next voxel is same type
+                || vbuf[voxaddr(...iter, vptr)] !== targetType 
+                // next voxel has the same exposed face
+                || !(tertiaryAxisStart > teritaryAxisLimit - 2
+                    ? true
+                    : vbuf[voxaddr(...face, vptr)] === voxel.air)
             ) {
                 loop = false
                 break
@@ -422,33 +438,175 @@ const createGreedyQuad = (
         if (!loop) {
             break
         }
-        iter[altAxis] = altEnd
-        for (let g = mainStart; g < mainEnd; g++) {
-            iter[mainAxis] = g
-            const visited = visitedIndex(...iter)
-            visitedMarker[visited] |= axisFlag
+        iter[altAxis] = altAxisEnd
+        iter[tertiaryAxis] = tertiaryAxisStart
+        for (let main = start; main < end; main++) {
+            iter[mainAxis] = main
+            const vIdx = visitedIndex(...iter)
+            visitedArr[vIdx] |= axisFlag
         }
-        altEnd++
+        altAxisEnd++
+    }
+
+    const vStart = vertices.length / 3                    
+    const minAlt = altRealCoord
+    const minTertiary = tertiaryRealCoord
+    const minMain = mainRealCoord
+    const maxAlt = altRealCoord + (altAxisEnd - altAxisStart) * lodFactor
+    const maxTertiary = minTertiary
+    const maxMain = mainRealCoord + (mainAxisEnd - mainAxisStart) * lodFactor
+    iter[altAxis] = minAlt
+    iter[tertiaryAxis] = minTertiary
+    iter[mainAxis] = minMain
+    vertices.push(...iter)
+    
+    iter[altAxis] = maxAlt
+    vertices.push(...iter)
+    
+    iter[altAxis] = minAlt
+    iter[mainAxis] = maxMain
+    vertices.push(...iter)
+    
+    iter[altAxis] = maxAlt
+    // min & max tertiary are the same here
+    iter[tertiaryAxis] = maxTertiary
+    vertices.push(...iter)
+    return vStart
+    /*
+    const mainAxis = 2
+    const mainAxisStart = z
+    let mainAxisEnd = mainAxisStart + 1
+    const mainAxisLimit = CHUNK_Z_DIMENSION
+    const altAxis = 0
+    const altAxisStart = x
+    let altAxisEnd = altAxisStart + 1
+    const altAxisLimit = CHUNK_X_DIMENSION
+    const tertiaryAxis = 1
+    const tertiaryAxisStart = y
+    const teritaryAxisLimit = CHUNK_Y_DIMENSION
+    const vbuf = voxelBuffer
+    const vptr = ptr
+    const visitedArr = visitedArray
+    const targetType = type
+    const positiveAxis = true
+    const faceCheckOffset = positiveAxis ? 1 : -1
+    const axisConstant = positiveAxis ? 1 : 0
+    const axisFlag = positiveYbit
+    const altRealCoord = xGlobal
+    const tertiaryRealCoord = y + axisConstant
+    const mainRealCoord = zGlobal
+    const lodFactor = skFactor
+    //const min = {
+    //    x: altRealCoord, 
+    //    y: tertiaryRealCoord,
+    //    z: mainRealCoord
+    //}
+    const iter = [0, 0, 0] as [number, number, number]
+    iter[altAxis] = altAxisStart
+    iter[tertiaryAxis] = tertiaryAxisStart
+    iter[mainAxis] = mainAxisEnd
+    const face = [...iter] as typeof iter
+    face[tertiaryAxis] = tertiaryAxisStart + faceCheckOffset
+    //const iter = [altAxisStart, tertiaryAxisStart, mainAxisEnd] as [number, number, number]
+    //const face = [altAxisStart, tertiaryAxisStart + faceCheckOffset, mainAxisEnd] as [number, number, number]
+    while (mainAxisEnd < mainAxisLimit) {
+        iter[mainAxis] = mainAxisEnd
+        const vIdx = visitedIndex(...iter)
+        face[mainAxis] = mainAxisEnd
+        const visited = visitedArr[vIdx] & axisFlag
+        if (
+            visited
+            // next voxel is not same type
+            || vbuf[voxaddr(...iter, vptr)] !== targetType 
+            // next voxel does not have same exposed face
+            || !(tertiaryAxisStart > teritaryAxisLimit - 2
+                ? true
+                : vbuf[voxaddr(...face, vptr)] === voxel.air)
+        ) {
+            break
+        }
+        visitedArr[vIdx] |= axisFlag
+        mainAxisEnd++
+    }
+
+    let loop = true
+    while (altAxisEnd < altAxisLimit) {
+        const start = mainAxisStart
+        const end = mainAxisEnd
+        iter[altAxis] = altAxisEnd
+        iter[tertiaryAxis] = tertiaryAxisStart
+        face[altAxis] = altAxisEnd
+        face[tertiaryAxis] = tertiaryAxisStart + faceCheckOffset
+        for (let main = start; main < end; main++) {
+            iter[mainAxis] = main
+            const vIdx = visitedIndex(...iter)
+            const visited = visitedArr[vIdx] & axisFlag
+            face[mainAxis] = main
+            if (
+                visited
+                // next voxel is same type
+                || vbuf[voxaddr(...iter, vptr)] !== targetType 
+                // next voxel has the same exposed face
+                || !(tertiaryAxisStart > teritaryAxisLimit - 2
+                    ? true
+                    : vbuf[voxaddr(...face, vptr)] === voxel.air)
+            ) {
+                loop = false
+                break
+            }
+        }
+        if (!loop) {
+            break
+        }
+        iter[altAxis] = altAxisEnd
+        iter[tertiaryAxis] = tertiaryAxisStart
+        for (let main = start; main < end; main++) {
+            iter[mainAxis] = main
+            const vIdx = visitedIndex(...iter)
+            visitedArr[vIdx] |= axisFlag
+        }
+        altAxisEnd++
     }
     
-    iter[tertiaryAxis] = tertiaryGlobal + (negativeAxis ? 0 : 1)
-    iter[mainAxis] = mainGlobal
-    iter[altAxis] = altGlobal
+    //const max = {
+    //    x: altRealCoord + (altAxisEnd - altAxisStart) * lodFactor,
+    //    y: tertiaryRealCoord,
+    //    z: mainRealCoord + (mainAxisEnd - mainAxisStart) * lodFactor
+    //}
+
+    const vStart = vertices.length / 3
+    
+    const minAlt = altRealCoord
+    const minTertiary = tertiaryRealCoord
+    const minMain = mainRealCoord
+    const maxAlt = altRealCoord + (altAxisEnd - altAxisStart) * lodFactor
+    const maxTertiary = minTertiary
+    const maxMain = mainRealCoord + (mainAxisEnd - mainAxisStart) * lodFactor
+    iter[altAxis] = minAlt
+    iter[tertiaryAxis] = minTertiary
+    iter[mainAxis] = minMain
     vertices.push(...iter)
     
-    iter[altAxis] = altGlobal + (altEnd - altStart) * skFactor
+    iter[altAxis] = maxAlt
     vertices.push(...iter)
-
     
-    iter[mainAxis] = mainGlobal + (mainEnd - mainStart) * skFactor
-    iter[altAxis] = altGlobal
+    iter[altAxis] = minAlt
+    iter[mainAxis] = maxMain
     vertices.push(...iter)
-
-    iter[altAxis] = altGlobal + (altEnd - altStart) * skFactor
-    iter[mainAxis] = mainGlobal + (mainEnd - mainStart) * skFactor
+    
+    iter[altAxis] = maxAlt
+    // min & max tertiary are the same here
+    iter[tertiaryAxis] = maxTertiary
     vertices.push(...iter)
-
-    return 4
+    
+    // min & max y are the same here
+    //vertices.push(
+    //    min.x, min.y, min.z,
+    //    max.x, min.y, min.z,
+    //    min.x, min.y, max.z,
+    //    max.x, max.y, max.z,
+    //)
+    */
 }
 
 const createColor = (
@@ -481,7 +639,7 @@ class Chunk {
     dimensions: Vec2
     levelOfDetail: number
     key: string
-    voxelBuffer: Vbuffer
+    voxelBuffer: VoxelBuffer
     vertexData: VertexData
     mesh: Mesh
     isRendered: boolean
@@ -638,12 +796,29 @@ class Chunk {
                     const visitedRef = visitedIndex(x, y, z)
                     const visited = visitedArray[visitedRef]
                     const positiveYAxisVisited = visited & positiveYbit
-                    if (positiveYAxisVisited) {
+                    const negativeYAxisVisited = visited & negativeYbit
+                    const positiveXAxisVisited = visited & positiveXbit
+                    const negativeXAxisVisited = visited & negativeXbit
+                    const positiveZAxisVisited = visited & positiveZbit
+                    const negativeZAxisVisited = visited & negativeZbit
+                    if (
+                        positiveYAxisVisited
+                        && negativeYAxisVisited
+                        && positiveXAxisVisited
+                        && negativeXAxisVisited
+                        && positiveZAxisVisited
+                        && negativeZAxisVisited
+                    ) {
                         continue
                     }
                     const type = voxelBuffer[v]
                     if (type === voxel.air) {
                         visitedArray[visitedRef] |= positiveYbit
+                        visitedArray[visitedRef] |= negativeYbit
+                        visitedArray[visitedRef] |= positiveXbit
+                        visitedArray[visitedRef] |= negativeXbit
+                        visitedArray[visitedRef] |= positiveXbit
+                        visitedArray[visitedRef] |= negativeZbit
                         continue
                     }
 
@@ -651,92 +826,193 @@ class Chunk {
                         ? true
                         : voxelBuffer[v + 1] === voxel.air
                     if (renderPositiveY && !positiveYAxisVisited) {
-                        const mainAxisStart = z
-                        let mainAxisEnd = mainAxisStart + 1
-                        const mainAxisLimit = CHUNK_Z_DIMENSION
-                        const altAxisStart = x
-                        let altAxisEnd = altAxisStart + 1
-                        const altAxisLimit = CHUNK_X_DIMENSION
-                        const tertiaryAxis = y
-                        const teritaryAxisLimit = CHUNK_Y_DIMENSION
-                        const vbuf = voxelBuffer
-                        const vptr = ptr
-                        const visitedArr = visitedArray
-                        const targetType = type
-                        const axisFlag = positiveYbit
-                        const altRealCoord = xGlobal
-                        const tertiaryRealCoord = y + 1
-                        const mainRealCoord = zGlobal
-                        const lodFactor = skFactor
-                        const min = {
-                            x: altRealCoord, 
-                            y: tertiaryRealCoord,
-                            z: mainRealCoord
-                        }
-                        while (mainAxisEnd < mainAxisLimit) {
-                            const vIdx = visitedIndex(altAxisStart, tertiaryAxis, mainAxisEnd)
-                            const visited = visitedArr[vIdx] & axisFlag
-                            if (
-                                visited
-                                // next voxel is not same type
-                                || vbuf[voxaddr(altAxisStart, tertiaryAxis, mainAxisEnd, vptr)] !== targetType 
-                                // next voxel does not have same exposed face
-                                || !(tertiaryAxis > teritaryAxisLimit - 2
-                                    ? true
-                                    : vbuf[voxaddr(altAxisStart, tertiaryAxis + 1, mainAxisEnd, vptr)] === voxel.air)
-                            ) {
-                                break
-                            }
-                            visitedArr[vIdx] |= axisFlag
-                            mainAxisEnd++
-                        }
+                        const vStart = greedyQuad(
+                            2,
+                            z,
+                            CHUNK_Z_DIMENSION,
+                            zGlobal,
+                            0,
+                            x,
+                            CHUNK_X_DIMENSION,
+                            xGlobal,
+                            1,
+                            y,
+                            CHUNK_Y_DIMENSION,
+                            y,
+                            voxelBuffer,
+                            ptr,
+                            visitedArray,
+                            type,
+                            true,
+                            positiveYbit,
+                            skFactor,
+                            vertices
+                        )
+                        indices.push(
+                            vStart + 0, vStart + 1, vStart + 2,
+                            vStart + 3, vStart + 2, vStart + 1, 
+                        )
+                        createColor(levelOfDetail, 4, colors)
+                    }
+                    const renderNegativeY = (
+                        y > 0 
+                        && voxelBuffer[v - 1] === voxel.air
+                    )
+                    if (renderNegativeY && !negativeYAxisVisited) {
+                        const vStart = greedyQuad(
+                            2,
+                            z,
+                            CHUNK_Z_DIMENSION,
+                            zGlobal,
+                            0,
+                            x,
+                            CHUNK_X_DIMENSION,
+                            xGlobal,
+                            1,
+                            y,
+                            CHUNK_Y_DIMENSION,
+                            y,
+                            voxelBuffer,
+                            ptr,
+                            visitedArray,
+                            type,
+                            false,
+                            negativeYbit,
+                            skFactor,
+                            vertices
+                        )
+                        // not sure if this has the correct normals
+                        indices.push(
+                            vStart + 0, vStart + 1, vStart + 2,
+                            vStart + 3, vStart + 2, vStart + 1, 
+                        )
+                        createColor(levelOfDetail, 4, colors)
+                    }
 
-                        let loop = true
-                        while (altAxisEnd < altAxisLimit) {
-                            const start = mainAxisStart
-                            const end = mainAxisEnd + 1
-                            for (let main = start; main < end; main++) {
-                                const vIdx = visitedIndex(altAxisEnd, tertiaryAxis, main)
-                                const visited = visitedArr[vIdx] & axisFlag
-                                if (
-                                    visited
-                                    // next voxel is same type
-                                    || vbuf[voxaddr(altAxisEnd, tertiaryAxis, main, vptr)] !== targetType 
-                                    // next voxel has the same exposed face
-                                    || !(tertiaryAxis > teritaryAxisLimit - 2
-                                        ? true
-                                        : vbuf[voxaddr(altAxisEnd, tertiaryAxis + 1, main, vptr)] === voxel.air)
-                                ) {
-                                    loop = false
-                                    break
-                                }
-                            }
-                            if (!loop) {
-                                break
-                            }
-                            for (let main = start; main < end; main++) {
-                                const vIdx = visitedIndex(altAxisEnd, tertiaryAxis, main)
-                                visitedArr[vIdx] |= axisFlag
-                            }
-                            altAxisEnd++
-                        }
-                        mainAxisEnd++
-                        altAxisEnd++
-                        const max = {
-                            x: altRealCoord + (altAxisEnd - altAxisStart) * lodFactor,
-                            y: tertiaryRealCoord,
-                            z: mainRealCoord + (mainAxisEnd - mainAxisStart) * lodFactor
-                        }
+                    const renderPositiveX = x > CHUNK_X_DIMENSION - 2 
+                        ? false
+                        : voxelBuffer[voxaddr(x + 1, y, z, ptr)] === voxel.air
+                    if (renderPositiveX && !positiveXAxisVisited) {
+                        const vStart = greedyQuad(
+                            1,
+                            y,
+                            CHUNK_Y_DIMENSION,
+                            y,
+                            2,
+                            z,
+                            CHUNK_Z_DIMENSION,
+                            zGlobal,
+                            0,
+                            x,
+                            CHUNK_X_DIMENSION,
+                            xGlobal,
+                            voxelBuffer,
+                            ptr,
+                            visitedArray,
+                            type,
+                            true,
+                            positiveXbit,
+                            skFactor,
+                            vertices
+                        )
+                        indices.push(
+                            vStart + 0, vStart + 1, vStart + 2,
+                            vStart + 3, vStart + 2, vStart + 1, 
+                        )
+                        createColor(levelOfDetail, 4, colors)
+                    }
 
-                        //console.log("quad size", max.x - min.x, max.z - min.z)
+                    const renderNegativeX = x < 1 
+                        ? false
+                        : voxelBuffer[voxaddr(x - 1, y, z, ptr)] === voxel.air
+                    if (renderNegativeX && !negativeXAxisVisited) {
+                        const vStart = greedyQuad(
+                            1,
+                            y,
+                            CHUNK_Y_DIMENSION,
+                            y,
+                            2,
+                            z,
+                            CHUNK_Z_DIMENSION,
+                            zGlobal,
+                            0,
+                            x,
+                            CHUNK_X_DIMENSION,
+                            xGlobal,
+                            voxelBuffer,
+                            ptr,
+                            visitedArray,
+                            type,
+                            false,
+                            negativeXbit,
+                            skFactor,
+                            vertices
+                        )
+                        indices.push(
+                            vStart + 0, vStart + 2, vStart + 1,
+                            vStart + 3, vStart + 1, vStart + 2, 
+                        )
+                        createColor(levelOfDetail, 4, colors)
+                    }
 
-                        const vStart = vertices.length / 3
-                        // min & max y are the same here
-                        vertices.push(
-                            min.x, min.y, min.z,
-                            max.x, min.y, min.z,
-                            min.x, min.y, max.z,
-                            max.x, max.y, max.z,
+                    const renderPositiveZ = z > CHUNK_Z_DIMENSION - 2 
+                        ? false
+                        : voxelBuffer[voxaddr(x, y, z + 1, ptr)] === voxel.air
+                    if (renderPositiveZ && !positiveZAxisVisited) {
+                        const vStart = greedyQuad(
+                            1,
+                            y,
+                            CHUNK_Y_DIMENSION,
+                            y,
+                            0,
+                            x,
+                            CHUNK_X_DIMENSION,
+                            xGlobal,
+                            2,
+                            z,
+                            CHUNK_Z_DIMENSION,
+                            zGlobal,
+                            voxelBuffer,
+                            ptr,
+                            visitedArray,
+                            type,
+                            true,
+                            positiveZbit,
+                            skFactor,
+                            vertices
+                        )
+                        indices.push(
+                            vStart + 0, vStart + 2, vStart + 1,
+                            vStart + 3, vStart + 1, vStart + 2, 
+                        )
+                        createColor(levelOfDetail, 4, colors)
+                    }
+
+                    const renderNegativeZ = z < 1 
+                        ? false
+                        : voxelBuffer[voxaddr(x, y, z - 1, ptr)] === voxel.air
+                    if (renderNegativeZ && !negativeZAxisVisited) {
+                        const vStart = greedyQuad(
+                            1,
+                            y,
+                            CHUNK_Y_DIMENSION,
+                            y,
+                            0,
+                            x,
+                            CHUNK_X_DIMENSION,
+                            xGlobal,
+                            2,
+                            z,
+                            CHUNK_Z_DIMENSION,
+                            zGlobal,
+                            voxelBuffer,
+                            ptr,
+                            visitedArray,
+                            type,
+                            false,
+                            positiveZbit,
+                            skFactor,
+                            vertices
                         )
                         indices.push(
                             vStart + 0, vStart + 1, vStart + 2,
@@ -757,6 +1033,7 @@ class Chunk {
         vd.applyToMesh(mesh, true)
         //mesh.material = mat
         console.info("greedy render took:", Date.now() - start, "ms. vs:", vertices.length.toLocaleString())
+        //mesh.occlusionType = AbstractMesh.OCCLUSION_TYPE_OPTIMISTIC
         this.isRendered = true
     }
 
