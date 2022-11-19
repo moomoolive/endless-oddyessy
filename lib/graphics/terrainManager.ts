@@ -260,6 +260,10 @@ const skipFactor = (levelOfDetail: number) => (2 ** (baseLod + levelOfDetail - 1
 
 const visitedIndex = (x: number, y: number, z: number) => x * CHUNK_Z_DIMENSION * CHUNK_Y_DIMENSION + z * CHUNK_Y_DIMENSION + y
 
+type AxisIterator = [number, number, number]
+const greedyQuadIter = [0, 0, 0] as AxisIterator
+const greedyQuadFace = [0, 0, 0] as AxisIterator
+
 type VoxelBuffer = Int32Array
 type AxisRef = 0 | 1 | 2
 const greedyQuad = (
@@ -288,12 +292,14 @@ const greedyQuad = (
     let altAxisEnd = altAxisStart + 1
     const faceCheckOffset = positiveAxis ? 1 : -1
 
-    const iter = [0, 0, 0] as [number, number, number]
+    const iter = greedyQuadIter
     iter[altAxis] = altAxisStart
     iter[tertiaryAxis] = tertiaryAxisStart
     iter[mainAxis] = mainAxisEnd
-    const face = [...iter] as typeof iter
+    const face = greedyQuadFace
+    face[altAxis] = altAxisStart
     face[tertiaryAxis] = tertiaryAxisStart + faceCheckOffset
+    face[mainAxis] = mainAxisEnd
     while (mainAxisEnd < mainAxisLimit) {
         iter[mainAxis] = mainAxisEnd
         const vIdx = visitedIndex(...iter)
@@ -559,9 +565,11 @@ class Chunk {
     isRendered: boolean
     simulationDelta: number 
     meshingDelta: number
-    vertexCount: number
-    faceCount: number
     mostRecentSimulationRendered: boolean
+    colors: number[]
+    vertices: number[]
+    faces: number[]
+    meshMethod: string
     
     constructor({
         center = new Vec2(),
@@ -571,8 +579,9 @@ class Chunk {
         key = "0.0[16]",
         id = "terrain-chunk-1",
     } = {}) {
-        this.faceCount = 0
-        this.vertexCount = 0
+        this.vertices = []
+        this.faces = []
+        this.colors = []
         this.key = key
         this.center = center
         this.bounds = bounds
@@ -586,6 +595,7 @@ class Chunk {
         this.mostRecentSimulationRendered = false
         this.simulationDelta = 0.0
         this.meshingDelta = 0.0
+        this.meshMethod = "none"
     }
 
     simulate() {
@@ -605,9 +615,10 @@ class Chunk {
                 const calcHeight = generateHeight(xGlobal, zGlobal)
                 const height = Math.max(calcHeight, 1)
                 const moisture = moistureNoise(xGlobal, zGlobal)
+                const biomeType = biome(height - 1, moisture)
                 for (let y = 0; y < height; y++) {
                     const v = yaddr(y, addressComputed)
-                    voxelBuffer[v] = biome(y, moisture)
+                    voxelBuffer[v] = biomeType
                 }
                 // zero out the rest
                 // think of a more efficent way later?
@@ -679,20 +690,15 @@ class Chunk {
                 }
             }
         }
-        const {vertexData: vd, mesh} = this
-        vd.indices = indices
-        vd.positions = vertices
-        vd.colors = colors
-        vd.applyToMesh(mesh, true)
-        this.isRendered = true
-        this.vertexCount = vertices.length / 3
-        this.faceCount = indices.length / 3
-        this.mostRecentSimulationRendered = true
+        this.vertices = vertices
+        this.faces = indices
+        this.colors = colors
+        this.meshMethod = "culled"
+        this.createSkirt()
         this.meshingDelta = Date.now() - start
-        console.info("greedy mesh took", this.meshingDelta, "ms, sim took", this.simulationDelta, "ms. vs:", this.vertexCount.toLocaleString("en-us"))
     }
 
-    greedyMesh({wireframe = false} = {}) {
+    greedyMesh() {
         const start = Date.now()
         const {levelOfDetail, voxelBuffer} = this
         const originx = this.bounds.min.x
@@ -954,8 +960,154 @@ class Chunk {
                 }
             }
         }
-        const {vertexData: vd, mesh} = this
-        vd.indices = indices
+        this.meshMethod = "greedy"
+        this.colors = colors
+        this.vertices = vertices
+        this.faces = indices
+        this.createSkirt()
+        this.meshingDelta = Date.now() - start
+    }
+
+    createSkirt() {
+        const {levelOfDetail, voxelBuffer} = this
+        const originx = this.bounds.min.x
+        const originz = this.bounds.min.z
+        const ptr = 0
+        const indices = this.faces
+        const vertices = this.vertices
+        const colors = this.colors
+        const skFactor = skipFactor(levelOfDetail)
+        const chunkZLimits = [0, CHUNK_Z_DIMENSION - 1]
+        for (let x = 0; x < CHUNK_X_DIMENSION; x++) {
+            const xGlobal = originx + x * skFactor
+            const xaddress = xaddr(ptr, x)
+
+            for (const z of chunkZLimits) {
+                const zGlobal = originz + z * skFactor
+                const zaddress = zaddr(z, xaddress)
+                let y = 0
+
+                while (y < CHUNK_Y_DIMENSION) {
+                    const v = yaddr(y, zaddress)
+                    const targetType = voxelBuffer[v]
+                    if (targetType === voxel.air) {
+                        y++
+                        continue
+                    }
+
+                    let minY = y
+                    let maxY = minY
+                    while (true) {
+                        const v = yaddr(y, zaddress)
+                        const candidateType = voxelBuffer[v]
+                        if (
+                            targetType !== candidateType
+                            || y > CHUNK_Y_DIMENSION - 2
+                        ) {
+                            maxY = y + 1
+                            break
+                        }
+                        y++
+                    }
+                    const positiveAxis = z > 0
+                    const maxX = xGlobal + skFactor
+                    const vStart = vertices.length / 3
+                    const targetZ = positiveAxis 
+                        ? zGlobal + skFactor
+                        : zGlobal
+                    const actualMinY = minY - 1
+                    const actualMaxY = maxY - 1
+                    vertices.push(
+                        xGlobal, actualMinY, targetZ,
+                        maxX, actualMinY, targetZ,
+                        xGlobal, actualMaxY, targetZ,
+                        maxX, actualMaxY, targetZ,
+                    )
+                    if (positiveAxis) {
+                        indices.push(
+                            vStart + 0, vStart + 2, vStart + 1,
+                            vStart + 3, vStart + 1, vStart + 2, 
+                        )
+                    } else {
+                        indices.push(
+                            vStart + 0, vStart + 1, vStart + 2,
+                            vStart + 3, vStart + 2, vStart + 1, 
+                        )
+                    }
+                    createColor(levelOfDetail, 4, colors)
+                }
+            }
+        }
+
+        const chunkXLimits = [0, CHUNK_X_DIMENSION - 1]
+        for (const x of chunkXLimits) {
+            const xGlobal = originx + x * skFactor
+            const xaddress = xaddr(ptr, x)
+
+            for (let z = 0; z < CHUNK_Z_DIMENSION; z++) {
+                const zGlobal = originz + z * skFactor
+                const zaddress = zaddr(z, xaddress)
+                let y = 0
+
+                while (y < CHUNK_Y_DIMENSION) {
+                    const v = yaddr(y, zaddress)
+                    const targetType = voxelBuffer[v]
+                    if (targetType === voxel.air) {
+                        y++
+                        continue
+                    }
+
+                    let minY = y
+                    let maxY = minY
+                    while (true) {
+                        const v = yaddr(y, zaddress)
+                        const candidateType = voxelBuffer[v]
+                        if (
+                            targetType !== candidateType
+                            || y > CHUNK_Y_DIMENSION - 2
+                        ) {
+                            maxY = y + 1
+                            break
+                        }
+                        y++
+                    }
+                    const positiveAxis = x > 0
+                    const maxZ = zGlobal + skFactor
+                    const vStart = vertices.length / 3
+                    const targetX = positiveAxis 
+                        ? xGlobal + skFactor 
+                        : xGlobal
+                    const actualMinY = minY - 1
+                    const actualMaxY = maxY - 1
+                    vertices.push(
+                        targetX, actualMinY, zGlobal,
+                        targetX, actualMinY, maxZ,
+                        targetX, actualMaxY, zGlobal,
+                        targetX, actualMaxY, maxZ,
+                    )
+                    if (positiveAxis) {
+                        indices.push(
+                            vStart + 0, vStart + 1, vStart + 2,
+                            vStart + 3, vStart + 2, vStart + 1, 
+                        )
+                    } else {
+                        indices.push(
+                            vStart + 0, vStart + 2, vStart + 1,
+                            vStart + 3, vStart + 1, vStart + 2, 
+                        )
+                    }
+                    createColor(levelOfDetail, 4, colors)
+                }
+            }
+        }
+    }
+
+    render({
+        wireframe = false,
+        logStats = false
+    } = {}) {
+        const {faces, vertices, colors, vertexData: vd, mesh} = this
+        vd.indices = faces
         vd.positions = vertices
         if (wireframe) {
             const mat = new StandardMaterial("wireframe" + Date.now())
@@ -967,17 +1119,24 @@ class Chunk {
         }
         vd.applyToMesh(mesh, true)
         this.isRendered = true
-        this.vertexCount = vertices.length / 3
-        this.faceCount = indices.length / 3
         this.mostRecentSimulationRendered = true
-        this.meshingDelta = Date.now() - start
-        console.info("greedy mesh took", this.meshingDelta, "ms, sim took", this.simulationDelta, "ms. vs:", this.vertexCount.toLocaleString("en-us"))
+        if (logStats) {
+            console.info(`${this.meshMethod} mesh took`, this.meshingDelta, "ms, sim took", this.simulationDelta, "ms. vs:", this.vertexCount().toLocaleString("en-us"))
+        }
     }
 
     destroyMesh() {
         const name = this.mesh.name
         this.mesh.dispose()
         this.mesh = new Mesh(name)
+    }
+
+    vertexCount() {
+        return this.vertices.length / 3
+    }
+
+    faceCount() {
+        return this.faces.length / 3
     }
 }
 
@@ -1095,7 +1254,8 @@ export class TerrainManager {
         const chunkref = this.rebuildChunks.pop()!
         const chunk = this.chunks[chunkref]
         chunk.simulate()
-        chunk.greedyMesh({wireframe: false})
+        chunk.greedyMesh()
+        chunk.render({wireframe: false, logStats: false})
         return true
     }
 
@@ -1104,10 +1264,16 @@ export class TerrainManager {
     }
 
     vertexCount() {
-        return this.chunks.reduce((total, {vertexCount}) => total + vertexCount, 0)
+        const cs = this.chunks
+        return cs.reduce((acc, c) => acc + c.vertexCount(), 0)
     }
 
     faceCount() {
-        return this.chunks.reduce((total, {faceCount}) => total + faceCount, 0)
+        const cs = this.chunks
+        return cs.reduce((acc, c) => acc + c.faceCount(), 0)
+    }
+
+    chunkCount() {
+        return this.chunks.length
     }
 }
