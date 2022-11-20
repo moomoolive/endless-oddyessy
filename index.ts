@@ -298,7 +298,7 @@ const main = async () => {
     }, scene)
     deleteTool.position.set(0.0, 20.0, 0.0)
     deleteTool.material = editMaterial
-    deleteTool.setEnabled(true)
+    deleteTool.setEnabled(false)
 
     const editingBlockRayCast = new CollisionInfo()
     engine.runRenderLoop(() => {

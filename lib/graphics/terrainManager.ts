@@ -570,6 +570,7 @@ class Chunk {
     vertices: number[]
     faces: number[]
     meshMethod: string
+    isOccluded: boolean
     
     constructor({
         center = new Vec2(),
@@ -591,6 +592,7 @@ class Chunk {
         this.voxelBuffer = new Int32Array(bytes)
         this.vertexData = new VertexData()
         this.mesh = new Mesh(id)
+        this.isOccluded = false
         this.isRendered = false
         this.mostRecentSimulationRendered = false
         this.simulationDelta = 0.0
@@ -606,14 +608,39 @@ class Chunk {
         const originz = this.bounds.min.z
         const ptr = 0
         const skFactor = skipFactor(levelOfDetail)
+        const prevXRow = []
+        for (let i = 0; i < CHUNK_Z_DIMENSION; i++) {
+            prevXRow.push(0)
+        }
         for (let x = 0; x < CHUNK_X_DIMENSION; x++) {
             const xAddressOffset = xaddr(ptr, x)
             const xGlobal = originx + x * skFactor
+            let prevZHeight = -100
             for (let z = 0; z < CHUNK_Z_DIMENSION; z++) {
                 const addressComputed = zaddr(z, xAddressOffset)
                 const zGlobal = originz + z * skFactor
                 const calcHeight = generateHeight(xGlobal, zGlobal)
-                const height = Math.max(calcHeight, 1)
+                const initHeight = Math.max(calcHeight, 1)
+                let height = initHeight
+                const highestDetail = levelOfDetail < 2
+                const prevZDiff = Math.abs(prevZHeight - height)
+                if (
+                    highestDetail
+                    || prevZDiff >= skFactor
+                ) {
+                    prevZHeight = height
+                } else {
+                    height = prevZHeight
+                }
+                const prevXDiff = Math.abs(prevXRow[z] - height)
+                if (
+                    levelOfDetail > 1
+                    && z > 1
+                    && prevXDiff < skFactor
+                ) {
+                    height = prevXRow[z]
+                }
+                prevXRow[z] = height
                 const moisture = moistureNoise(xGlobal, zGlobal)
                 const biomeType = biome(height - 1, moisture)
                 for (let y = 0; y < height; y++) {
@@ -754,7 +781,7 @@ class Chunk {
                         visitedArray[visitedRef] |= negativeYbit
                         visitedArray[visitedRef] |= positiveXbit
                         visitedArray[visitedRef] |= negativeXbit
-                        visitedArray[visitedRef] |= positiveXbit
+                        visitedArray[visitedRef] |= positiveZbit
                         visitedArray[visitedRef] |= negativeZbit
                         continue
                     }
@@ -947,7 +974,7 @@ class Chunk {
                             visitedArray,
                             type,
                             false,
-                            positiveZbit,
+                            negativeZbit,
                             skFactor,
                             vertices
                         )
@@ -1118,6 +1145,7 @@ class Chunk {
             vd.colors = colors
         }
         vd.applyToMesh(mesh, true)
+        this.isOccluded = false
         this.isRendered = true
         this.mostRecentSimulationRendered = true
         if (logStats) {
@@ -1264,13 +1292,17 @@ export class TerrainManager {
     }
 
     vertexCount() {
-        const cs = this.chunks
-        return cs.reduce((acc, c) => acc + c.vertexCount(), 0)
+        return this.chunks.reduce((total, c) => {
+            const count = c.isRendered ? c.vertexCount() : 0
+            return total + count
+        }, 0)
     }
 
     faceCount() {
-        const cs = this.chunks
-        return cs.reduce((acc, c) => acc + c.faceCount(), 0)
+        return this.chunks.reduce((total, c) => {
+            const count = c.isRendered ? c.faceCount() : 0
+            return total + count
+        }, 0)
     }
 
     chunkCount() {
