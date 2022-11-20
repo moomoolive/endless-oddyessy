@@ -2,7 +2,6 @@ import {
     Scene, 
     Engine,
     Vector3,
-    HemisphericLight,
     MeshBuilder,
     StandardMaterial,
     Texture,
@@ -14,6 +13,7 @@ import {
     Quaternion,
     CreateBox,
     Color4,
+    DirectionalLight
 } from "babylonjs"
 import 'babylonjs-loaders' // for gltf loader
 import fpsMeter from "stats.js"
@@ -22,7 +22,6 @@ import {
     sweepPoint,
     CollisionInfo
 } from "./lib/physics/index"
-import {Chunks} from "./lib/graphics/chunkManager"
 import {
     lerp, toRadians, toDegrees, fpEqual, 
     createAxisRotation
@@ -54,8 +53,8 @@ const main = async () => {
     camera.lowerBetaLimit = 0.1
     camera.attachControl(canvas, true)
     camera.inputs.clear()
-    const _light = new HemisphericLight(
-        "light1", new Vector3(1.0, 1.0, 0.0), scene
+    const _light = new DirectionalLight(
+        "light1", new Vector3(0.0, -1.0, 0.0), scene
     )
 
     const skybox = MeshBuilder.CreateBox(
@@ -288,17 +287,17 @@ const main = async () => {
         width: 4_096, height: 19.25, depth: 4_096,
         updatable: true,
         faceColors: [
-            new Color4(0.0, 0.0, 1.0, 1.0),
-            new Color4(0.0, 0.0, 1.0, 1.0),
-            new Color4(0.0, 0.0, 1.0, 1.0),
-            new Color4(0.0, 0.0, 1.0, 1.0),
-            new Color4(0.0, 0.0, 1.0, 1.0),
-            new Color4(0.0, 0.0, 1.0, 1.0),
+            new Color4(68/255, 85/255, 90/255, 1.0),
+            new Color4(68/255, 85/255, 90/255, 1.0),
+            new Color4(68/255, 85/255, 90/255, 1.0),
+            new Color4(68/255, 85/255, 90/255, 1.0),
+            new Color4(68/255, 85/255, 90/255, 1.0),
+            new Color4(68/255, 85/255, 90/255, 1.0),
         ]
     }, scene)
     deleteTool.position.set(0.0, 20.0, 0.0)
     deleteTool.material = editMaterial
-    deleteTool.setEnabled(false)
+    deleteTool.setEnabled(true)
 
     const editingBlockRayCast = new CollisionInfo()
     engine.runRenderLoop(() => {
