@@ -130,7 +130,7 @@ export class Quadtree {
     }
 
     private recursivelyGetLeafNodes(child: Node, output: Node[]) {
-        if (child.children.length < 1 && child.size.x < this.minNodeSize * 8 + 1) {
+        if (child.children.length < 1 && child.size.x >= this.minNodeSize) {
             output.push(child)
             return
         }

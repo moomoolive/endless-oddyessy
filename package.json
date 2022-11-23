@@ -2,12 +2,10 @@
   "scripts": {
     "build": "esbuild index.ts --bundle --format=esm --outfile=dist/index.mjs",
     "build-debug": "esbuild index.ts --bundle --sourcemap --format=esm --outfile=dist/index.mjs",
-    "dev": "nodemon --ignore *.mjs -e js,ts --exec npm run build-debug",
+    "dev": "nodemon --ignore *.mjs -e js,ts --exec npm run build",
     "test": "vitest"
   },
   "dependencies": {
-    "@babylonjs/core": "^5.33.1",
-    "@babylonjs/loaders": "^5.33.1",
     "alea": "^1.0.1",
     "babylonjs": "^5.17.1",
     "babylonjs-loaders": "^5.18.0",
@@ -17,6 +15,8 @@
   "devDependencies": {
     "@types/stats.js": "^0.17.0",
     "esbuild": "^0.14.51",
+    "fast-png": "^6.1.0",
+    "jimp": "^0.16.2",
     "nodemon": "^2.0.19",
     "vitest": "^0.22.1"
   }

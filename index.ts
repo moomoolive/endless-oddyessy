@@ -26,7 +26,9 @@ import {
     lerp, toRadians, toDegrees, fpEqual, 
     createAxisRotation
 } from "./lib/math/index"
-import {TerrainManager} from "./lib/graphics/terrainManager"
+import {TerrainManager, HeightMap} from "./lib/graphics/terrainManager"
+import rawHeightMap from "./assets/terrain-16bit.json"
+import {decode} from "fast-png"
 
 const deceleration = new Vector3(-10.0, -0.0001, -10.0)
 
@@ -204,10 +206,17 @@ const main = async () => {
         kinematics: {mass: 10.0, gravityModifier: 1.0},
         velocity: {x: 0.0, y: 0.0, z: 0.0},
         acceleration: {x: 2_000.0, y: 0.25, z: 2_000.0},
-        position: {x: 120.0, y: 100.0, z: 120.0},
+        position: {x: 2_048.0, y: 500.0, z: 2_048.0},
         rendering: {id: 0},
     }
-    const chunkManager = new TerrainManager({})
+    const rawHeightMap = await import("./assets/terrain-16bit.json")
+    const heightMap = new HeightMap(rawHeightMap)
+    console.info(`imported height map (${heightMap.height},${heightMap.width}), with ${heightMap.uniqueDataPoints()} data points`)
+    
+    const chunkManager = new TerrainManager({
+        heightMap
+    })
+
     {
         const {x, z} = playerEntity.position
         chunkManager.diffChunks(x, z)
@@ -219,6 +228,12 @@ const main = async () => {
             ", faces", chunkManager.faceCount().toLocaleString(),
             ", chunks", chunkManager.chunkCount().toLocaleString()
         )
+        const visible = {true: 0, false: 0}
+        for (const {mesh} of chunkManager.chunks) {
+            const bool = camera.isInFrustum(mesh)
+            bool ? visible.true++ : visible.false++
+        }
+        console.log("[stats]: frustrum mesh count", visible, "total", chunkManager.chunks.length)
     }
 
     //{
@@ -283,21 +298,22 @@ const main = async () => {
     editingBlock.position.set(46.0, 50.5, 200.0)
     editingBlock.material = editMaterial
 
-    const deleteTool = CreateBox("deleteTool", {
-        width: 4_096, height: 19.25, depth: 4_096,
-        updatable: true,
-        faceColors: [
-            new Color4(68/255, 85/255, 90/255, 1.0),
-            new Color4(68/255, 85/255, 90/255, 1.0),
-            new Color4(68/255, 85/255, 90/255, 1.0),
-            new Color4(68/255, 85/255, 90/255, 1.0),
-            new Color4(68/255, 85/255, 90/255, 1.0),
-            new Color4(68/255, 85/255, 90/255, 1.0),
-        ]
-    }, scene)
-    deleteTool.position.set(0.0, 20.0, 0.0)
-    deleteTool.material = editMaterial
-    deleteTool.setEnabled(true)
+    // mc sea level is 62
+    //const deleteTool = CreateBox("deleteTool", {
+    //    width: 5_000, height: 30.75, depth: 5_000,
+    //    updatable: true,
+    //    faceColors: [
+    //        new Color4(68/255, 85/255, 90/255, 1.0),
+    //        new Color4(68/255, 85/255, 90/255, 1.0),
+    //        new Color4(68/255, 85/255, 90/255, 1.0),
+    //        new Color4(68/255, 85/255, 90/255, 1.0),
+    //        new Color4(68/255, 85/255, 90/255, 1.0),
+    //        new Color4(68/255, 85/255, 90/255, 1.0),
+    //    ]
+    //}, scene)
+    //deleteTool.position.set(2_048.0, 31.0, 2_048.0)
+    //deleteTool.material = editMaterial
+    //deleteTool.setEnabled(false)
 
     const editingBlockRayCast = new CollisionInfo()
     engine.runRenderLoop(() => {

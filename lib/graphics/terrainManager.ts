@@ -4,27 +4,33 @@ import {createNoise2D} from "simplex-noise"
 import alea from "alea"
 import {VertexData, Mesh, StandardMaterial, Color3} from "babylonjs"
 
-const noise1 = createNoise2D(alea("seed1"))
+const noise1 = createNoise2D(alea("random"))
 
 const CHUNK_X_DIMENSION = 64
 const CHUNK_Z_DIMENSION = CHUNK_X_DIMENSION
-const CHUNK_Y_DIMENSION = 128
+const CHUNK_Y_DIMENSION = 1_024
 const VOXELS_PER_CHUNK = (
     CHUNK_X_DIMENSION
     * CHUNK_Y_DIMENSION
     * CHUNK_Z_DIMENSION
 )
-const TERRAIN_MID = 50
+const TERRAIN_MID = 160
 const BYTES_PER_CHUNK = VOXELS_PER_CHUNK * Int32Array.BYTES_PER_ELEMENT
+const TERRAIN_MAX_X = 4_096
+const TERRAIN_MAX_Z = TERRAIN_MAX_X
 
 type n = number
 const xaddr = (ptr: n, x: n) => ptr + (x * CHUNK_Z_DIMENSION * CHUNK_Y_DIMENSION)
 const zaddr = (z: n, xAddress: n) => (z * CHUNK_Y_DIMENSION) + xAddress
 const yaddr = (y: n, zAddress: n) => y + zAddress
 const voxaddr = (x: n, y: n, z: n, ptr: n) => yaddr(y, zaddr(z, xaddr(ptr, x)))
-const elevationNoise = (x: n, z: n) => fractionalBMotion(noise1, x, z, 200.0, 6.0, 0.4, 2.0)
-const moistureNoise = (x: n, z: n) => fractionalBMotion(noise1, x, z, 512.0, 4.0, 0.5, 4.0)
-const generateHeight = (x: n, z: n) => Math.abs(~~(elevationNoise(x, z) * CHUNK_Y_DIMENSION) + TERRAIN_MID)
+const elevationNoise = (x: n, z: n) => fractionalBMotion(noise1, x, z, 200.0, 5, 0.7, 3.0, 1.6)
+const moistureNoise = (x: n, z: n) => fractionalBMotion(noise1, x, z, 512.0, 4, 0.5, 4.0, 2.0)
+
+const heightMultipler = ~~(CHUNK_Y_DIMENSION / 2)
+const generateHeight = (x: n, z: n) => Math.abs(~~(elevationNoise(x, z) * heightMultipler) + TERRAIN_MID)
+
+const nearestPowerOf2 = (num: number) => 1 << 31 - Math.clz32(num)
 
 const vertexColors = (
     r: number, 
@@ -388,145 +394,9 @@ const greedyQuad = (
     vertices.push(...iter)
     
     iter[altAxis] = maxAlt
-    // min & max tertiary are the same here
     iter[tertiaryAxis] = maxTertiary
     vertices.push(...iter)
     return vStart
-    /*
-    const mainAxis = 2
-    const mainAxisStart = z
-    let mainAxisEnd = mainAxisStart + 1
-    const mainAxisLimit = CHUNK_Z_DIMENSION
-    const altAxis = 0
-    const altAxisStart = x
-    let altAxisEnd = altAxisStart + 1
-    const altAxisLimit = CHUNK_X_DIMENSION
-    const tertiaryAxis = 1
-    const tertiaryAxisStart = y
-    const teritaryAxisLimit = CHUNK_Y_DIMENSION
-    const vbuf = voxelBuffer
-    const vptr = ptr
-    const visitedArr = visitedArray
-    const targetType = type
-    const positiveAxis = true
-    const faceCheckOffset = positiveAxis ? 1 : -1
-    const axisConstant = positiveAxis ? 1 : 0
-    const axisFlag = positiveYbit
-    const altRealCoord = xGlobal
-    const tertiaryRealCoord = y + axisConstant
-    const mainRealCoord = zGlobal
-    const lodFactor = skFactor
-    //const min = {
-    //    x: altRealCoord, 
-    //    y: tertiaryRealCoord,
-    //    z: mainRealCoord
-    //}
-    const iter = [0, 0, 0] as [number, number, number]
-    iter[altAxis] = altAxisStart
-    iter[tertiaryAxis] = tertiaryAxisStart
-    iter[mainAxis] = mainAxisEnd
-    const face = [...iter] as typeof iter
-    face[tertiaryAxis] = tertiaryAxisStart + faceCheckOffset
-    //const iter = [altAxisStart, tertiaryAxisStart, mainAxisEnd] as [number, number, number]
-    //const face = [altAxisStart, tertiaryAxisStart + faceCheckOffset, mainAxisEnd] as [number, number, number]
-    while (mainAxisEnd < mainAxisLimit) {
-        iter[mainAxis] = mainAxisEnd
-        const vIdx = visitedIndex(...iter)
-        face[mainAxis] = mainAxisEnd
-        const visited = visitedArr[vIdx] & axisFlag
-        if (
-            visited
-            // next voxel is not same type
-            || vbuf[voxaddr(...iter, vptr)] !== targetType 
-            // next voxel does not have same exposed face
-            || !(tertiaryAxisStart > teritaryAxisLimit - 2
-                ? true
-                : vbuf[voxaddr(...face, vptr)] === voxel.air)
-        ) {
-            break
-        }
-        visitedArr[vIdx] |= axisFlag
-        mainAxisEnd++
-    }
-
-    let loop = true
-    while (altAxisEnd < altAxisLimit) {
-        const start = mainAxisStart
-        const end = mainAxisEnd
-        iter[altAxis] = altAxisEnd
-        iter[tertiaryAxis] = tertiaryAxisStart
-        face[altAxis] = altAxisEnd
-        face[tertiaryAxis] = tertiaryAxisStart + faceCheckOffset
-        for (let main = start; main < end; main++) {
-            iter[mainAxis] = main
-            const vIdx = visitedIndex(...iter)
-            const visited = visitedArr[vIdx] & axisFlag
-            face[mainAxis] = main
-            if (
-                visited
-                // next voxel is same type
-                || vbuf[voxaddr(...iter, vptr)] !== targetType 
-                // next voxel has the same exposed face
-                || !(tertiaryAxisStart > teritaryAxisLimit - 2
-                    ? true
-                    : vbuf[voxaddr(...face, vptr)] === voxel.air)
-            ) {
-                loop = false
-                break
-            }
-        }
-        if (!loop) {
-            break
-        }
-        iter[altAxis] = altAxisEnd
-        iter[tertiaryAxis] = tertiaryAxisStart
-        for (let main = start; main < end; main++) {
-            iter[mainAxis] = main
-            const vIdx = visitedIndex(...iter)
-            visitedArr[vIdx] |= axisFlag
-        }
-        altAxisEnd++
-    }
-    
-    //const max = {
-    //    x: altRealCoord + (altAxisEnd - altAxisStart) * lodFactor,
-    //    y: tertiaryRealCoord,
-    //    z: mainRealCoord + (mainAxisEnd - mainAxisStart) * lodFactor
-    //}
-
-    const vStart = vertices.length / 3
-    
-    const minAlt = altRealCoord
-    const minTertiary = tertiaryRealCoord
-    const minMain = mainRealCoord
-    const maxAlt = altRealCoord + (altAxisEnd - altAxisStart) * lodFactor
-    const maxTertiary = minTertiary
-    const maxMain = mainRealCoord + (mainAxisEnd - mainAxisStart) * lodFactor
-    iter[altAxis] = minAlt
-    iter[tertiaryAxis] = minTertiary
-    iter[mainAxis] = minMain
-    vertices.push(...iter)
-    
-    iter[altAxis] = maxAlt
-    vertices.push(...iter)
-    
-    iter[altAxis] = minAlt
-    iter[mainAxis] = maxMain
-    vertices.push(...iter)
-    
-    iter[altAxis] = maxAlt
-    // min & max tertiary are the same here
-    iter[tertiaryAxis] = maxTertiary
-    vertices.push(...iter)
-    
-    // min & max y are the same here
-    //vertices.push(
-    //    min.x, min.y, min.z,
-    //    max.x, min.y, min.z,
-    //    min.x, min.y, max.z,
-    //    max.x, max.y, max.z,
-    //)
-    */
 }
 
 const createColor = (
@@ -588,7 +458,8 @@ class Chunk {
         this.bounds = bounds
         this.dimensions = dimensions
         this.levelOfDetail = Math.max(levelOfDetail, 1)
-        const bytes = new SharedArrayBuffer(BYTES_PER_CHUNK)
+        //const bytes = new SharedArrayBuffer(BYTES_PER_CHUNK)
+        const bytes = new ArrayBuffer(BYTES_PER_CHUNK)
         this.voxelBuffer = new Int32Array(bytes)
         this.vertexData = new VertexData()
         this.mesh = new Mesh(id)
@@ -598,6 +469,47 @@ class Chunk {
         this.simulationDelta = 0.0
         this.meshingDelta = 0.0
         this.meshMethod = "none"
+    }
+
+    heightMapSimulation(heightMap: HeightMap) {
+        const start = Date.now()
+        this.levelOfDetail = Math.max(this.levelOfDetail, 1)
+        const {levelOfDetail, voxelBuffer} = this
+        const originx = this.bounds.min.x
+        const originz = this.bounds.min.z
+        const ptr = 0
+        const divisionFactor = nearestPowerOf2(heightMap.height)
+        const div = TERRAIN_MAX_X / divisionFactor
+        const skFactor = skipFactor(levelOfDetail)
+        for (let x = 0; x < CHUNK_X_DIMENSION; x++) {
+            const xAddressOffset = xaddr(ptr, x)
+            const xGlobal = originx + x * skFactor
+            for (let z = 0; z < CHUNK_Z_DIMENSION; z++) {
+                const addressComputed = zaddr(z, xAddressOffset)
+                const zGlobal = originz + z * skFactor
+                const percent = heightMap.getHeight(
+                    ~~(xGlobal / div),
+                    ~~(zGlobal / div),
+                )
+                const calcHeight = ~~(percent)
+                const initHeight = Math.max(calcHeight, 1)
+                let height = initHeight
+                const moisture = moistureNoise(xGlobal, zGlobal)
+                const biomeType = biome(height - 1, moisture)
+                for (let y = 0; y < height; y++) {
+                    const v = yaddr(y, addressComputed)
+                    voxelBuffer[v] = biomeType
+                }
+                // zero out the rest
+                // think of a more efficent way later?
+                for (let y = height; y < CHUNK_Y_DIMENSION; y++) {
+                    const v = yaddr(y, addressComputed)
+                    voxelBuffer[v] = voxel.air
+                }
+            }
+        }
+        this.simulationDelta = Date.now() - start
+        this.mostRecentSimulationRendered = false
     }
 
     simulate() {
@@ -1184,8 +1096,11 @@ export class TerrainManager {
     chunks: Chunk[]
     nearestChunkBoundaryX: number
     nearestChunkBoundaryZ: number
+    heightMap: null | HeightMap
 
-    constructor({} = {}) {
+    constructor({
+        heightMap = null as (HeightMap | null)
+    } = {}) {
         this.minNodeSize = CHUNK_X_DIMENSION
         this.chunkIndex = new Map()
         this.nearestChunkBoundaryX = 0
@@ -1193,6 +1108,7 @@ export class TerrainManager {
         this.recycledChunks = []
         this.chunks = []
         this.rebuildChunks = []
+        this.heightMap = heightMap
     }
 
     private getRecyclableChunk() {
@@ -1203,10 +1119,11 @@ export class TerrainManager {
     }
 
     diffChunks(cameraX: number, cameraY: number) {
-        const pt = 2_048
+        const maxZ = TERRAIN_MAX_Z
+        const maxX = TERRAIN_MAX_X
         const quadTree = new Quadtree({
-            min: new Vec2(-pt, -pt),
-            max: new Vec2(pt, pt),
+            min: new Vec2(0, 0),
+            max: new Vec2(maxX, maxZ),
             minNodeSize: CHUNK_X_DIMENSION
         })
         const camera = new Vec2(cameraX, cameraY)
@@ -1281,7 +1198,11 @@ export class TerrainManager {
         }
         const chunkref = this.rebuildChunks.pop()!
         const chunk = this.chunks[chunkref]
-        chunk.simulate()
+        if (this.heightMap) {
+            chunk.heightMapSimulation(this.heightMap)
+        } else {
+            chunk.simulate()
+        }
         chunk.greedyMesh()
         chunk.render({wireframe: false, logStats: false})
         return true
@@ -1307,5 +1228,38 @@ export class TerrainManager {
 
     chunkCount() {
         return this.chunks.length
+    }
+}
+
+export class HeightMap {
+    height: number
+    width: number
+    data: number[]
+    high: number
+    
+    constructor({
+        height, width, high, data
+    }: {
+        height: number,
+        width: number,
+        high: number,
+        data: number[],
+    }) {
+        this.height = height
+        this.width = width
+        this.data = data
+        this.high = high
+    }
+
+    getHeight(x: number, y: number) {
+        return this.data[this.height * y + x]
+    }
+
+    getHeightPercent(x: number, y: number) {
+        return this.getHeight(x, y) / this.high
+    }
+
+    uniqueDataPoints() {
+        return this.height * this.width
     }
 }
