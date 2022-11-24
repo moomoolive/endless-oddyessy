@@ -3,7 +3,8 @@
     "build": "esbuild index.ts --bundle --format=esm --outfile=dist/index.mjs",
     "build-debug": "esbuild index.ts --bundle --sourcemap --format=esm --outfile=dist/index.mjs",
     "dev": "nodemon --ignore *.mjs -e js,ts --exec npm run build",
-    "test": "vitest"
+    "test": "vitest",
+    "dev-server": "node dev-server.mjs"
   },
   "dependencies": {
     "alea": "^1.0.1",
@@ -13,10 +14,12 @@
     "stats.js": "^0.17.0"
   },
   "devDependencies": {
+    "@types/live-server": "^1.2.1",
     "@types/stats.js": "^0.17.0",
     "esbuild": "^0.14.51",
     "fast-png": "^6.1.0",
     "jimp": "^0.16.2",
+    "live-server": "^1.2.2",
     "nodemon": "^2.0.19",
     "vitest": "^0.22.1"
   }

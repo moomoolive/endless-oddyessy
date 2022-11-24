@@ -27,8 +27,8 @@ import {
     createAxisRotation
 } from "./lib/math/index"
 import {TerrainManager, HeightMap} from "./lib/graphics/terrainManager"
-import rawHeightMap from "./assets/terrain-16bit.json"
-import {decode} from "fast-png"
+//import rawHeightMap from "./assets/terrain-16bit.json"
+//import {decode} from "fast-png"
 
 const deceleration = new Vector3(-10.0, -0.0001, -10.0)
 
@@ -206,7 +206,7 @@ const main = async () => {
         kinematics: {mass: 10.0, gravityModifier: 1.0},
         velocity: {x: 0.0, y: 0.0, z: 0.0},
         acceleration: {x: 2_000.0, y: 0.25, z: 2_000.0},
-        position: {x: 2_048.0, y: 500.0, z: 2_048.0},
+        position: {x: 2_048.0, y: 250.0, z: 2_048.0},
         rendering: {id: 0},
     }
     const rawHeightMap = await import("./assets/terrain-16bit.json")
@@ -217,8 +217,30 @@ const main = async () => {
         heightMap
     })
 
+    const lodSystemState = {
+        boundaryX: {
+            upper: 0,
+            lower: 0
+        },
+        boundaryZ: {
+            upper: 0,
+            lower: 0
+        }
+    }
+
+    const minChunkSize = 32
+
     {
         const {x, z} = playerEntity.position
+        const xDiff = x % minChunkSize
+        const xbase = x - xDiff
+        lodSystemState.boundaryX.lower = xbase
+        lodSystemState.boundaryX.upper = xbase + minChunkSize
+        const zDiff = z % minChunkSize
+        const zbase = z - zDiff
+        lodSystemState.boundaryZ.lower = zbase
+        lodSystemState.boundaryZ.upper = zbase + minChunkSize
+
         chunkManager.diffChunks(x, z)
         while (chunkManager.hasTasks()) {
             chunkManager.execPendingTask()
@@ -227,6 +249,12 @@ const main = async () => {
             "[stats]: vertices", chunkManager.vertexCount().toLocaleString(),
             ", faces", chunkManager.faceCount().toLocaleString(),
             ", chunks", chunkManager.chunkCount().toLocaleString()
+        )
+        console.info(
+            "[stats]: avg sim time", chunkManager.averageSimTime(),
+            "ms , avg mesh time", chunkManager.averageMeshTime(),
+            "ms, avg skirt time", chunkManager.averageSkirtTime(),
+            "ms"
         )
         const visible = {true: 0, false: 0}
         for (const {mesh} of chunkManager.chunks) {
@@ -668,14 +696,34 @@ const main = async () => {
         }
         */
 
-        //{
-        //    const {x, z} = player.position
-        //    chunkManager.diffChunks(x, z)
-        //    chunkManager.execPendingTask()
-        //}
+        {
 
-        // render world
-        scene.render()
+            const {x, z} = player.position
+            const {boundaryX, boundaryZ} = lodSystemState
+            if (
+                x > boundaryX.upper
+                || x < boundaryX.lower
+                || z > boundaryZ.upper
+                || z < boundaryZ.lower
+            ) {
+                const xDiff = x % minChunkSize
+                const xbase = x - xDiff
+                lodSystemState.boundaryX.lower = xbase
+                lodSystemState.boundaryX.upper = xbase + minChunkSize
+                const zDiff = z % minChunkSize
+                const zbase = z - zDiff
+                lodSystemState.boundaryZ.lower = zbase
+                lodSystemState.boundaryZ.upper = zbase + minChunkSize
+                chunkManager.diffChunks(x, z)
+                console.info("diffed chunks", boundaryX, boundaryZ, x, z)
+            }
+            chunkManager.execPendingTask()
+        }
+
+        {
+            scene.render()
+        }
+
         meter.end()
     })
 }   

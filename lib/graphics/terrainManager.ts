@@ -1,14 +1,27 @@
 import {Quadtree, Vec2, Box2} from "./quadTree"
-import {fractionalBMotion, biome, voxel} from "./chunkManager"
+import {fractionalBMotion, biome} from "./chunkManager"
 import {createNoise2D} from "simplex-noise"
 import alea from "alea"
 import {VertexData, Mesh, StandardMaterial, Color3} from "babylonjs"
 
-const noise1 = createNoise2D(alea("random"))
+const enum voxel {
+    air = 0,
+    stone = 1,
+    grass = 2,
+    dirt = 3,
+    water = 4,
+    sand = 5,
+    snow = 6,
+    unknown_solid = 7
+}
+
+const noise1 = createNoise2D(alea("random")) 
 
 const CHUNK_X_DIMENSION = 64
 const CHUNK_Z_DIMENSION = CHUNK_X_DIMENSION
 const CHUNK_Y_DIMENSION = 1_024
+const CHUNK_Z_LIMITS = [0, CHUNK_Z_DIMENSION - 1] as const
+const CHUNK_X_LIMITS = [0, CHUNK_X_DIMENSION - 1] as const
 const VOXELS_PER_CHUNK = (
     CHUNK_X_DIMENSION
     * CHUNK_Y_DIMENSION
@@ -270,6 +283,10 @@ type AxisIterator = [number, number, number]
 const greedyQuadIter = [0, 0, 0] as AxisIterator
 const greedyQuadFace = [0, 0, 0] as AxisIterator
 
+interface VoxelChecker {
+    getVoxel: (x: number, y: number, z: number) => number
+}
+
 type VoxelBuffer = Int32Array
 type AxisRef = 0 | 1 | 2
 const greedyQuad = (
@@ -285,14 +302,13 @@ const greedyQuad = (
     tertiaryAxisStart: number,
     teritaryAxisLimit: number,
     tertiaryGlobalCoord: number,
-    vbuf: VoxelBuffer,
-    vptr: number,
     visitedArr: Uint8Array,
     targetType: number,
     positiveAxis: boolean,
     axisFlag: number,
     lodFactor: number,
-    vertices: number[]
+    vertices: number[],
+    voxels: VoxelChecker
 ) => {
     let mainAxisEnd = mainAxisStart + 1
     let altAxisEnd = altAxisStart + 1
@@ -314,11 +330,15 @@ const greedyQuad = (
         if (
             visited
             // next voxel is not same type
-            || vbuf[voxaddr(...iter, vptr)] !== targetType 
+            //|| vbuf[voxaddr(...iter, vptr)] !== targetType 
+            || voxels.getVoxel(...iter) !== targetType 
             // next voxel does not have same exposed face
+            //|| !(tertiaryAxisStart > teritaryAxisLimit - 2
+            //    ? true
+            //    : vbuf[voxaddr(...face, vptr)] === voxel.air)
             || !(tertiaryAxisStart > teritaryAxisLimit - 2
                 ? true
-                : vbuf[voxaddr(...face, vptr)] === voxel.air)
+                : voxels.getVoxel(...face) === voxel.air)
         ) {
             break
         }
@@ -342,11 +362,15 @@ const greedyQuad = (
             if (
                 visited
                 // next voxel is same type
-                || vbuf[voxaddr(...iter, vptr)] !== targetType 
+                //|| vbuf[voxaddr(...iter, vptr)] !== targetType 
+                || voxels.getVoxel(...iter) !== targetType 
                 // next voxel has the same exposed face
+                //|| !(tertiaryAxisStart > teritaryAxisLimit - 2
+                //    ? true
+                //    : vbuf[voxaddr(...face, vptr)] === voxel.air)
                 || !(tertiaryAxisStart > teritaryAxisLimit - 2
                     ? true
-                    : vbuf[voxaddr(...face, vptr)] === voxel.air)
+                    : voxels.getVoxel(...face) === voxel.air)
             ) {
                 loop = false
                 break
@@ -423,24 +447,297 @@ const createColor = (
     }
 }
 
+class VoxelInterval {
+    static null() {
+        return new VoxelInterval(NO_VOXEL, NO_LENGTH)
+    }
+
+    type: number
+    length: number
+
+    constructor(type: number, length: number) {
+        this.type = type
+        this.length = length
+    }
+
+    isNull() {
+        return this.type === NO_VOXEL
+    }
+}
+
+type VoxelRun = VoxelInterval[]
+const NO_LENGTH = -1
+const NO_VOXEL = -1
+
+class VoxelRunIterator {
+    run: VoxelRun
+    end: number
+    type: number
+    start: number
+    nextRun: number
+    runX: number
+    runZ: number
+
+    constructor(run: VoxelRun, x: number, z: number) {
+        this.run = run
+        this.end = run.length
+        this.nextRun = 0
+        this.runX = x
+        this.runZ = z
+        this.start = 0
+        this.type = NO_VOXEL
+    }
+
+    reset(run: VoxelRun, x: number, z: number) {
+        this.run = run
+        this.runX = x
+        this.runZ = z
+        this.start = 0
+        this.end = 0
+        this.type = NO_VOXEL
+        this.nextRun = 0
+        return this
+    }
+
+    iter() {
+        if (!this.hasNext()) {
+            return false
+        }
+        this.start = this.end
+        const next = this.run[this.nextRun]
+        this.type = next.type
+        this.end += next.length
+        this.nextRun++
+        return true
+    }
+
+    iterTo(y: number) {
+        if (y <= this.end) {
+            return this.reverseTo(y)
+        } else {
+            return this.forwardTo(y)
+        }
+    }
+
+    forwardTo(y: number) {
+        while (y > this.end && this.iter()) {}
+        return false
+    }
+
+    iterRev() {
+        if (!this.hasPrevious()) {
+            return false
+        }
+        this.end = this.start
+        const prev = this.run[this.nextRun - 2]
+        this.type = prev.type
+        this.start -= prev.length
+        this.nextRun--
+        return true
+    }
+
+    reverseTo(y: number) {
+        while (y > this.end && this.iterRev()) {}
+        return false
+    }
+
+    hasNext() {
+        return this.nextRun < this.run.length
+    }
+
+    hasPrevious() {
+        return this.nextRun > 1
+    }
+
+    isNull() {
+        return this.run.length < 1 || this.run[0].isNull()
+    }
+
+    isSolid() {
+        return this.type !== NO_VOXEL && this.type !== voxel.air 
+    }
+
+    firstAirVoxel() {
+        if (this.isNull()) {
+            return CHUNK_Y_DIMENSION
+        }
+        const runs = this.run
+        const startRun = runs[0]
+        let type = startRun.type
+        let start = 0
+        let end = startRun.length
+        let nextRun = 1
+        const totalRuns = runs.length
+        while (nextRun < totalRuns && type !== voxel.air) {
+            start = end
+            const next = runs[nextRun]
+            type = next.type
+            end += next.length
+            nextRun++
+        }
+        return start
+    }
+}
+
+const NULL_VOXEL_RUN = [VoxelInterval.null()]
+
+class VoxelColumnIterator {
+    target: VoxelRunIterator
+    left: VoxelRunIterator
+    right: VoxelRunIterator
+    front: VoxelRunIterator
+    back: VoxelRunIterator
+    currentY: number
+
+    constructor(run: VoxelRun, x: number, z: number) {
+        this.target = new VoxelRunIterator(run, x, z)
+        this.left = new VoxelRunIterator(run, x, z)
+        this.right = new VoxelRunIterator(run, x, z)
+        this.front = new VoxelRunIterator(run, x, z)
+        this.back = new VoxelRunIterator(run, x, z)
+        this.currentY = 0
+    }
+
+    height() {
+        const col = this.target.run
+        let currentRun = col.length - 1
+        let height = CHUNK_Y_DIMENSION
+        while (col[currentRun].type === voxel.air) {
+            height -= col[currentRun].length
+            currentRun--
+        }
+        return height + 1
+    }
+
+    reset(
+        targetX: number,
+        targetZ: number,
+        target: VoxelRun,
+        left: VoxelRun,
+        right: VoxelRun,
+        back: VoxelRun,
+        front: VoxelRun,
+    ) {
+        this.target.reset(target, targetX, targetZ)
+        this.left.reset(left, targetX - 1, targetZ)
+        this.right.reset(right, targetX + 1, targetZ)
+        this.back.reset(back, targetX, targetZ - 1)
+        this.front.reset(front, targetX, targetZ + 1)
+        return this
+    }
+
+    currentVoxel() {
+        return this.target.type
+    }
+
+    iterTo(y: number) {
+        this.target.forwardTo(y)
+        this.currentY = y
+    }
+
+    topVoxel() {
+        const y = this.currentY + 1
+        if (this.target.end >= y) {
+            return this.target.type
+        } else if (this.target.hasNext()) {
+            return this.target.run[this.target.nextRun].type
+        } else {
+            return voxel.unknown_solid
+        }
+    }
+
+    bottomVoxel() {
+        const y = this.currentY - 1
+        if (this.target.start <= y) {
+            return this.target.type
+        } else if (this.target.hasPrevious()) {
+            return this.target.run[this.target.nextRun - 2].type
+        } else {
+            return voxel.air
+        } 
+    }
+
+    rightVoxel() {
+        this.right.forwardTo(this.currentY)
+        return this.right.type
+    }
+
+    leftVoxel() {
+        this.left.forwardTo(this.currentY)
+        return this.left.type
+    }
+
+    frontVoxel() {
+        this.front.forwardTo(this.currentY)
+        return this.front.type
+    }
+
+    backVoxel() {
+        this.back.forwardTo(this.currentY)
+        return this.back.type
+    }
+
+    firstExposedFace() {
+        const left = this.left.firstAirVoxel()
+        const right = this.right.firstAirVoxel()
+        const front = this.front.firstAirVoxel()
+        const back = this.back.firstAirVoxel()
+        const target = this.target.firstAirVoxel() - 1
+        const lowest = Math.min(left, right, front, back, target)
+        return lowest
+    }
+}
+
+type Ptr = number
+type RunPointers = Ptr[]
+
+const enum axis_flags {
+    positive_z = 1 << 0,
+    negative_z = 1 << 1,
+    positive_x = 1 << 2,
+    negative_x = 1 << 3,
+    positive_y = 1 << 4,
+    negative_y = 1 << 5,
+    all_flags = (
+        positive_x
+        + negative_x
+        + positive_y
+        + negative_y
+        + positive_z
+        + negative_z
+    )
+}
+
+let wireframeShader: StandardMaterial
+
 class Chunk {
     center: Vec2
     bounds: Box2
     dimensions: Vec2
     levelOfDetail: number
     key: string
-    voxelBuffer: VoxelBuffer
+    //voxelBuffer: VoxelBuffer
     vertexData: VertexData
     mesh: Mesh
     isRendered: boolean
     simulationDelta: number 
     meshingDelta: number
+    skirtDelta: number
     mostRecentSimulationRendered: boolean
     colors: number[]
     vertices: number[]
     faces: number[]
     meshMethod: string
     isOccluded: boolean
+    runPtrs: RunPointers
+    runs: VoxelRun[]
+
+    private iter: VoxelRunIterator
+    private columnIter: VoxelColumnIterator
+
+    lookupCache1X: number
+    lookupCache1Z: number
+    cachedRun1: VoxelRun
     
     constructor({
         center = new Vec2(),
@@ -459,8 +756,7 @@ class Chunk {
         this.dimensions = dimensions
         this.levelOfDetail = Math.max(levelOfDetail, 1)
         //const bytes = new SharedArrayBuffer(BYTES_PER_CHUNK)
-        const bytes = new ArrayBuffer(BYTES_PER_CHUNK)
-        this.voxelBuffer = new Int32Array(bytes)
+        //this.voxelBuffer = new Int32Array(0)
         this.vertexData = new VertexData()
         this.mesh = new Mesh(id)
         this.isOccluded = false
@@ -468,13 +764,101 @@ class Chunk {
         this.mostRecentSimulationRendered = false
         this.simulationDelta = 0.0
         this.meshingDelta = 0.0
+        this.skirtDelta = 0.0
         this.meshMethod = "none"
+
+        this.runPtrs = []
+        this.runs = []
+        for (let x = 0; x < CHUNK_X_DIMENSION; x++) {
+            for (let z = 0; z < CHUNK_Z_DIMENSION; z++) {
+                const ptr = this.runs.length
+                const run = []
+                this.runs.push([
+                    VoxelInterval.null(),
+                    VoxelInterval.null(),
+                ])
+                this.runPtrs.push(ptr)
+            }
+        }
+
+        const startX = 0
+        const startZ = 0
+        const startRun = this.getRun(startX, startZ)
+        this.iter = new VoxelRunIterator(startRun, startX, startZ)
+        this.columnIter = new VoxelColumnIterator(startRun, startX, startZ)
+
+        this.lookupCache1X = startX
+        this.lookupCache1Z = startZ
+        this.cachedRun1 = startRun
+    }
+
+    getRun(x: number, z: number) {
+        const ptrRef = z * CHUNK_X_DIMENSION + x
+        const ptr = this.runPtrs[ptrRef]
+        return this.runs[ptr]
+    }
+
+    getVoxel(x: number, y: number, z: number) {
+        const runs = this.getRun(x, z)
+        const startRun = runs[0]
+        let type = startRun.type
+        let end = startRun.length
+        let nextRun = 1
+        const totalRuns = runs.length
+        while (nextRun < totalRuns && end < y) {
+            const next = runs[nextRun]
+            type = next.type
+            end += next.length
+            nextRun++
+        }
+        return type
+    }
+
+    getRunIterator(x: number, z: number) {
+        const run = this.getRun(x, z)
+        return this.iter.reset(run, x, z)
+
+    }
+
+    columnLastSolidVoxel(x: number, z: number) {
+        const col = this.getRun(x, z)
+        let currentRun = col.length - 1
+        let height = CHUNK_Y_DIMENSION
+        while (col[currentRun].type === voxel.air) {
+            height -= col[currentRun].length
+            currentRun--
+        }
+        return height
+    }
+
+    getColumnHeight(x: number, z: number) {
+        return this.columnLastSolidVoxel(x, z) + 1
+    }
+
+    getColumnIterator(x: number, z: number) {
+        const target = this.getRun(x, z)
+        const left = x < 1 
+            ? NULL_VOXEL_RUN 
+            : this.getRun(x - 1, z)
+        const right = x > CHUNK_X_DIMENSION - 2
+            ? NULL_VOXEL_RUN 
+            : this.getRun(x + 1, z)
+        const back = z < 1
+            ? NULL_VOXEL_RUN
+            : this.getRun(x, z - 1)
+        const front = z > CHUNK_Z_DIMENSION - 2
+            ? NULL_VOXEL_RUN
+            : this.getRun(x, z + 1)
+        return this.columnIter.reset(
+            x, z,
+            target, left, right, back, front
+        )
     }
 
     heightMapSimulation(heightMap: HeightMap) {
         const start = Date.now()
         this.levelOfDetail = Math.max(this.levelOfDetail, 1)
-        const {levelOfDetail, voxelBuffer} = this
+        const {levelOfDetail} = this
         const originx = this.bounds.min.x
         const originz = this.bounds.min.z
         const ptr = 0
@@ -492,26 +876,38 @@ class Chunk {
                     ~~(zGlobal / div),
                 )
                 const calcHeight = ~~(percent)
-                const initHeight = Math.max(calcHeight, 1)
-                let height = initHeight
+                const greaterThanMin = Math.max(calcHeight, 1)
+                const lesserThanMax = Math.min(greaterThanMin, CHUNK_Y_DIMENSION)
+                const height = lesserThanMax
                 const moisture = moistureNoise(xGlobal, zGlobal)
-                const biomeType = biome(height - 1, moisture)
-                for (let y = 0; y < height; y++) {
-                    const v = yaddr(y, addressComputed)
-                    voxelBuffer[v] = biomeType
-                }
-                // zero out the rest
-                // think of a more efficent way later?
-                for (let y = height; y < CHUNK_Y_DIMENSION; y++) {
-                    const v = yaddr(y, addressComputed)
-                    voxelBuffer[v] = voxel.air
-                }
+                const currentRun = this.getRun(x, z) 
+                // hard code for now
+                const biomeRun = currentRun[0]
+                biomeRun.type = biome(height - 1, moisture)
+                biomeRun.length = height
+
+                const airRunLength = CHUNK_Y_DIMENSION - height
+                const airRun = currentRun[1]
+                airRun.type = voxel.air
+                airRun.length = airRunLength
+                
+                //for (let y = 0; y < height; y++) {
+                //    const v = yaddr(y, addressComputed)
+                //    voxelBuffer[v] = biomeType
+                //}
+                //// zero out the rest
+                //// think of a more efficent way later?
+                //for (let y = height; y < CHUNK_Y_DIMENSION; y++) {
+                //    const v = yaddr(y, addressComputed)
+                //    voxelBuffer[v] = voxel.air
+                //}
             }
         }
         this.simulationDelta = Date.now() - start
         this.mostRecentSimulationRendered = false
     }
 
+    /*
     simulate() {
         const start = Date.now()
         this.levelOfDetail = Math.max(this.levelOfDetail, 1)
@@ -570,7 +966,9 @@ class Chunk {
         this.simulationDelta = Date.now() - start
         this.mostRecentSimulationRendered = false
     }
+    */
 
+    /*
     culledMesh() {
         const start = Date.now()
         const {levelOfDetail, voxelBuffer} = this
@@ -636,10 +1034,11 @@ class Chunk {
         this.createSkirt()
         this.meshingDelta = Date.now() - start
     }
+    */
 
     greedyMesh() {
         const start = Date.now()
-        const {levelOfDetail, voxelBuffer} = this
+        const {levelOfDetail} = this
         const originx = this.bounds.min.x
         const originz = this.bounds.min.z
         const ptr = 0
@@ -653,12 +1052,6 @@ class Chunk {
             * CHUNK_Z_DIMENSION
         )
         const visitedArray = new Uint8Array(sliceVolume)
-        const positiveZbit = 1
-        const negativeZbit = 2
-        const positiveXbit = 4
-        const negativeXbit = 8
-        const positiveYbit = 16
-        const negativeYbit = 32
         for (let x = 0; x < CHUNK_X_DIMENSION; x++) {
             const xGlobal = originx + x * skFactor
             const xaddress = xaddr(ptr, x)
@@ -666,42 +1059,31 @@ class Chunk {
             for (let z = 0; z < CHUNK_Z_DIMENSION; z++) {
                 const zGlobal = originz + z * skFactor
                 const zaddress = zaddr(z, xaddress)
-                
-                for (let y = 0; y < CHUNK_Y_DIMENSION; y++) {
+                const column = this.getColumnIterator(x, z)
+                const start = column.firstExposedFace()
+                const height = column.height()
+                for (let y = start; y < height; y++) {
                     const v = yaddr(y, zaddress)
                     const visitedRef = visitedIndex(x, y, z)
                     const visited = visitedArray[visitedRef]
-                    const positiveYAxisVisited = visited & positiveYbit
-                    const negativeYAxisVisited = visited & negativeYbit
-                    const positiveXAxisVisited = visited & positiveXbit
-                    const negativeXAxisVisited = visited & negativeXbit
-                    const positiveZAxisVisited = visited & positiveZbit
-                    const negativeZAxisVisited = visited & negativeZbit
-                    if (
-                        positiveYAxisVisited
-                        && negativeYAxisVisited
-                        && positiveXAxisVisited
-                        && negativeXAxisVisited
-                        && positiveZAxisVisited
-                        && negativeZAxisVisited
-                    ) {
+                    if (visited === axis_flags.all_flags) {
                         continue
                     }
-                    const type = voxelBuffer[v]
+                    column.iterTo(y)
+                    const type = column.currentVoxel()
                     if (type === voxel.air) {
-                        visitedArray[visitedRef] |= positiveYbit
-                        visitedArray[visitedRef] |= negativeYbit
-                        visitedArray[visitedRef] |= positiveXbit
-                        visitedArray[visitedRef] |= negativeXbit
-                        visitedArray[visitedRef] |= positiveZbit
-                        visitedArray[visitedRef] |= negativeZbit
+                        visitedArray[visitedRef] = axis_flags.all_flags
                         continue
                     }
-
-                    const renderPositiveY = y > CHUNK_Y_DIMENSION - 2
-                        ? true
-                        : voxelBuffer[v + 1] === voxel.air
-                    if (renderPositiveY && !positiveYAxisVisited) {
+                    
+                    //const renderPositiveY = y > CHUNK_Y_DIMENSION - 2
+                    //    ? true
+                    //    : column.topVoxel() === voxel.air //this.getVoxel(x, y + 1, z) === voxel.air
+                    const positiveYAxisVisited = visited & axis_flags.positive_y
+                    if (
+                        !positiveYAxisVisited
+                        && column.topVoxel() === voxel.air
+                    ) {
                         const vStart = greedyQuad(
                             2,
                             z,
@@ -715,14 +1097,13 @@ class Chunk {
                             y,
                             CHUNK_Y_DIMENSION,
                             y,
-                            voxelBuffer,
-                            ptr,
                             visitedArray,
                             type,
                             true,
-                            positiveYbit,
+                            axis_flags.positive_y,//positiveYbit,
                             skFactor,
-                            vertices
+                            vertices,
+                            this
                         )
                         indices.push(
                             vStart + 0, vStart + 1, vStart + 2,
@@ -730,11 +1111,16 @@ class Chunk {
                         )
                         createColor(levelOfDetail, 4, colors)
                     }
-                    const renderNegativeY = (
-                        y > 0 
-                        && voxelBuffer[v - 1] === voxel.air
-                    )
-                    if (renderNegativeY && !negativeYAxisVisited) {
+                    //const renderNegativeY = (
+                    //    y > 0 
+                    //    && this.getVoxel(x, y - 1, z) === voxel.air
+                    //)
+                    const negativeYAxisVisited = visited & axis_flags.negative_y
+                    if (
+                        !negativeYAxisVisited
+                        && y > 0
+                        && column.bottomVoxel() === voxel.air
+                    ) {
                         const vStart = greedyQuad(
                             2,
                             z,
@@ -748,14 +1134,13 @@ class Chunk {
                             y,
                             CHUNK_Y_DIMENSION,
                             y,
-                            voxelBuffer,
-                            ptr,
                             visitedArray,
                             type,
                             false,
-                            negativeYbit,
+                            axis_flags.negative_y,//negativeYbit,
                             skFactor,
-                            vertices
+                            vertices,
+                            this
                         )
                         // not sure if this has the correct normals
                         indices.push(
@@ -765,10 +1150,15 @@ class Chunk {
                         createColor(levelOfDetail, 4, colors)
                     }
 
-                    const renderPositiveX = x > CHUNK_X_DIMENSION - 2 
-                        ? false
-                        : voxelBuffer[voxaddr(x + 1, y, z, ptr)] === voxel.air
-                    if (renderPositiveX && !positiveXAxisVisited) {
+                    //const renderPositiveX = x > CHUNK_X_DIMENSION - 2 
+                    //    ? false
+                    //    : this.getVoxel(x + 1, y, z) === voxel.air
+                    const positiveXAxisVisited = visited & axis_flags.positive_x
+                    if (
+                        !positiveXAxisVisited
+                        && x < CHUNK_X_DIMENSION - 1
+                        && column.rightVoxel() === voxel.air
+                    ) {
                         const vStart = greedyQuad(
                             1,
                             y,
@@ -782,14 +1172,13 @@ class Chunk {
                             x,
                             CHUNK_X_DIMENSION,
                             xGlobal,
-                            voxelBuffer,
-                            ptr,
                             visitedArray,
                             type,
                             true,
-                            positiveXbit,
+                            axis_flags.positive_x,//positiveXbit,
                             skFactor,
-                            vertices
+                            vertices,
+                            this
                         )
                         indices.push(
                             vStart + 0, vStart + 1, vStart + 2,
@@ -798,10 +1187,15 @@ class Chunk {
                         createColor(levelOfDetail, 4, colors)
                     }
 
-                    const renderNegativeX = x < 1 
-                        ? false
-                        : voxelBuffer[voxaddr(x - 1, y, z, ptr)] === voxel.air
-                    if (renderNegativeX && !negativeXAxisVisited) {
+                    //const renderNegativeX = x < 1 
+                    //    ? false
+                    //    : this.getVoxel(x - 1, y, z) === voxel.air
+                    const negativeXAxisVisited = visited & axis_flags.negative_x
+                    if (
+                        !negativeXAxisVisited
+                        && x > 0
+                        && column.leftVoxel() === voxel.air
+                    ) {
                         const vStart = greedyQuad(
                             1,
                             y,
@@ -815,14 +1209,13 @@ class Chunk {
                             x,
                             CHUNK_X_DIMENSION,
                             xGlobal,
-                            voxelBuffer,
-                            ptr,
                             visitedArray,
                             type,
                             false,
-                            negativeXbit,
+                            axis_flags.negative_x,//negativeXbit,
                             skFactor,
-                            vertices
+                            vertices,
+                            this
                         )
                         indices.push(
                             vStart + 0, vStart + 2, vStart + 1,
@@ -831,10 +1224,15 @@ class Chunk {
                         createColor(levelOfDetail, 4, colors)
                     }
 
-                    const renderPositiveZ = z > CHUNK_Z_DIMENSION - 2 
-                        ? false
-                        : voxelBuffer[voxaddr(x, y, z + 1, ptr)] === voxel.air
-                    if (renderPositiveZ && !positiveZAxisVisited) {
+                    //const renderPositiveZ = z > CHUNK_Z_DIMENSION - 2 
+                    //    ? false
+                    //    : this.getVoxel(x, y, z + 1) === voxel.air
+                    const positiveZAxisVisited = visited & axis_flags.positive_z
+                    if (
+                        !positiveZAxisVisited
+                        && z < CHUNK_Z_DIMENSION - 1
+                        && column.frontVoxel() === voxel.air
+                    ) {
                         const vStart = greedyQuad(
                             1,
                             y,
@@ -848,14 +1246,13 @@ class Chunk {
                             z,
                             CHUNK_Z_DIMENSION,
                             zGlobal,
-                            voxelBuffer,
-                            ptr,
                             visitedArray,
                             type,
                             true,
-                            positiveZbit,
+                            axis_flags.positive_z,//positiveZbit,
                             skFactor,
-                            vertices
+                            vertices,
+                            this
                         )
                         indices.push(
                             vStart + 0, vStart + 2, vStart + 1,
@@ -864,10 +1261,15 @@ class Chunk {
                         createColor(levelOfDetail, 4, colors)
                     }
 
-                    const renderNegativeZ = z < 1 
-                        ? false
-                        : voxelBuffer[voxaddr(x, y, z - 1, ptr)] === voxel.air
-                    if (renderNegativeZ && !negativeZAxisVisited) {
+                    //const renderNegativeZ = z < 1 
+                    //    ? false
+                    //    : this.getVoxel(x, y, z - 1) === voxel.air
+                    const negativeZAxisVisited = visited & axis_flags.negative_z
+                    if (
+                        !negativeZAxisVisited
+                        && z > 0
+                        && column.backVoxel() === voxel.air
+                    ) {
                         const vStart = greedyQuad(
                             1,
                             y,
@@ -881,14 +1283,13 @@ class Chunk {
                             z,
                             CHUNK_Z_DIMENSION,
                             zGlobal,
-                            voxelBuffer,
-                            ptr,
                             visitedArray,
                             type,
                             false,
-                            negativeZbit,
+                            axis_flags.negative_z,//negativeZbit,
                             skFactor,
-                            vertices
+                            vertices,
+                            this
                         )
                         indices.push(
                             vStart + 0, vStart + 1, vStart + 2,
@@ -908,7 +1309,8 @@ class Chunk {
     }
 
     createSkirt() {
-        const {levelOfDetail, voxelBuffer} = this
+        const start = Date.now()
+        const {levelOfDetail} = this
         const originx = this.bounds.min.x
         const originz = this.bounds.min.z
         const ptr = 0
@@ -916,37 +1318,14 @@ class Chunk {
         const vertices = this.vertices
         const colors = this.colors
         const skFactor = skipFactor(levelOfDetail)
-        const chunkZLimits = [0, CHUNK_Z_DIMENSION - 1]
         for (let x = 0; x < CHUNK_X_DIMENSION; x++) {
             const xGlobal = originx + x * skFactor
-            const xaddress = xaddr(ptr, x)
-
-            for (const z of chunkZLimits) {
+            for (const z of CHUNK_Z_LIMITS) {
                 const zGlobal = originz + z * skFactor
-                const zaddress = zaddr(z, xaddress)
-                let y = 0
-
-                while (y < CHUNK_Y_DIMENSION) {
-                    const v = yaddr(y, zaddress)
-                    const targetType = voxelBuffer[v]
-                    if (targetType === voxel.air) {
-                        y++
+                const voxels = this.getRunIterator(x, z)
+                while (voxels.iter()) {
+                    if (voxels.type === voxel.air) {
                         continue
-                    }
-
-                    let minY = y
-                    let maxY = minY
-                    while (true) {
-                        const v = yaddr(y, zaddress)
-                        const candidateType = voxelBuffer[v]
-                        if (
-                            targetType !== candidateType
-                            || y > CHUNK_Y_DIMENSION - 2
-                        ) {
-                            maxY = y + 1
-                            break
-                        }
-                        y++
                     }
                     const positiveAxis = z > 0
                     const maxX = xGlobal + skFactor
@@ -954,8 +1333,8 @@ class Chunk {
                     const targetZ = positiveAxis 
                         ? zGlobal + skFactor
                         : zGlobal
-                    const actualMinY = minY - 1
-                    const actualMaxY = maxY - 1
+                    const actualMinY = voxels.start
+                    const actualMaxY = voxels.end + 1
                     vertices.push(
                         xGlobal, actualMinY, targetZ,
                         maxX, actualMinY, targetZ,
@@ -978,46 +1357,23 @@ class Chunk {
             }
         }
 
-        const chunkXLimits = [0, CHUNK_X_DIMENSION - 1]
-        for (const x of chunkXLimits) {
+        for (const x of CHUNK_X_LIMITS) {
             const xGlobal = originx + x * skFactor
-            const xaddress = xaddr(ptr, x)
-
             for (let z = 0; z < CHUNK_Z_DIMENSION; z++) {
                 const zGlobal = originz + z * skFactor
-                const zaddress = zaddr(z, xaddress)
-                let y = 0
-
-                while (y < CHUNK_Y_DIMENSION) {
-                    const v = yaddr(y, zaddress)
-                    const targetType = voxelBuffer[v]
-                    if (targetType === voxel.air) {
-                        y++
+                const voxels = this.getRunIterator(x, z)
+                while (voxels.iter()) {
+                    if (voxels.type === voxel.air) {
                         continue
-                    }
-
-                    let minY = y
-                    let maxY = minY
-                    while (true) {
-                        const v = yaddr(y, zaddress)
-                        const candidateType = voxelBuffer[v]
-                        if (
-                            targetType !== candidateType
-                            || y > CHUNK_Y_DIMENSION - 2
-                        ) {
-                            maxY = y + 1
-                            break
-                        }
-                        y++
                     }
                     const positiveAxis = x > 0
                     const maxZ = zGlobal + skFactor
                     const vStart = vertices.length / 3
                     const targetX = positiveAxis 
-                        ? xGlobal + skFactor 
+                        ? xGlobal + skFactor
                         : xGlobal
-                    const actualMinY = minY - 1
-                    const actualMaxY = maxY - 1
+                    const actualMinY = voxels.start
+                    const actualMaxY = voxels.end + 1
                     vertices.push(
                         targetX, actualMinY, zGlobal,
                         targetX, actualMinY, maxZ,
@@ -1039,6 +1395,7 @@ class Chunk {
                 }
             }
         }
+        this.skirtDelta = Date.now() - start
     }
 
     render({
@@ -1049,10 +1406,12 @@ class Chunk {
         vd.indices = faces
         vd.positions = vertices
         if (wireframe) {
-            const mat = new StandardMaterial("wireframe" + Date.now())
-            mat.emissiveColor = Color3.White()
-            mat.wireframe = true
-            mesh.material = mat
+            if (!wireframeShader) {
+                wireframeShader = new StandardMaterial("wireframe" + Date.now())
+                wireframeShader.emissiveColor = Color3.White()
+                wireframeShader.wireframe = true
+            }
+            mesh.material = wireframeShader
         } else {
             vd.colors = colors
         }
@@ -1086,6 +1445,17 @@ const NULL_CHUNK_HANDLE = -1
 
 const moduloIntFast = (dividend: number, divisor: number) => {
     return dividend - ~~(dividend / divisor) * divisor
+}
+
+const average = (nums: number[]) => {
+    const count = nums.length
+    const sum = nums.reduce((total, n) => total + n , 0)
+    return sum / count
+}
+
+const roundDecimal = (num: number, decimals: number) => {
+    const factor = 10 ** decimals
+    return Math.round(num * factor) / factor
 }
 
 export class TerrainManager {
@@ -1148,7 +1518,6 @@ export class TerrainManager {
             }
         }
 
-        const minQuad = quadTree.minNodeSize
         let chunkref = 0
         let chunksReused = 0
         for (const {center, bounds, size} of children) {
@@ -1201,10 +1570,10 @@ export class TerrainManager {
         if (this.heightMap) {
             chunk.heightMapSimulation(this.heightMap)
         } else {
-            chunk.simulate()
+            //chunk.simulate()
         }
         chunk.greedyMesh()
-        chunk.render({wireframe: false, logStats: false})
+        chunk.render({wireframe: false, logStats: true})
         return true
     }
 
@@ -1224,6 +1593,21 @@ export class TerrainManager {
             const count = c.isRendered ? c.faceCount() : 0
             return total + count
         }, 0)
+    }
+
+    averageSimTime(decimals = 2) {
+        const sim = this.chunks.map(({simulationDelta}) => simulationDelta)
+        return roundDecimal(average(sim), decimals)
+    }
+
+    averageMeshTime(decimals = 2) {
+        const mesh = this.chunks.map(({meshingDelta}) => meshingDelta)
+        return roundDecimal(average(mesh), decimals)
+    }
+
+    averageSkirtTime(decimals = 2) {
+        const mesh = this.chunks.map(({skirtDelta}) => skirtDelta)
+        return roundDecimal(average(mesh), decimals)
     }
 
     chunkCount() {
