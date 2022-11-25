@@ -256,20 +256,7 @@ const main = async () => {
             "ms, avg skirt time", chunkManager.averageSkirtTime(),
             "ms"
         )
-        const visible = {true: 0, false: 0}
-        for (const {mesh} of chunkManager.chunks) {
-            const bool = camera.isInFrustum(mesh)
-            bool ? visible.true++ : visible.false++
-        }
-        console.log("[stats]: frustrum mesh count", visible, "total", chunkManager.chunks.length)
     }
-
-    //{
-    //    const {x, z} = playerEntity.position
-    //    if (!chunkManager.init(x, z)) {
-    //        console.warn("chunk generator failed to execute")
-    //    }
-    //}
 
     const p = await playerModelPromise
     const player = p.meshes[0] as Mesh
@@ -718,6 +705,11 @@ const main = async () => {
                 console.info("diffed chunks", boundaryX, boundaryZ, x, z)
             }
             chunkManager.execPendingTask()
+        }
+
+        // some logging stuff
+        {
+            console.log("terrain chunks", chunkManager.chunkCount())
         }
 
         {

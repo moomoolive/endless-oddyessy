@@ -728,25 +728,22 @@ class Chunk {
     vertices: number[]
     faces: number[]
     meshMethod: string
-    isOccluded: boolean
     runPtrs: RunPointers
     runs: VoxelRun[]
+    readonly id: string
 
     private iter: VoxelRunIterator
     private columnIter: VoxelColumnIterator
-
-    lookupCache1X: number
-    lookupCache1Z: number
-    cachedRun1: VoxelRun
     
     constructor({
-        center = new Vec2(),
-        bounds = new Box2(new Vec2(), new Vec2()),
-        dimensions = new Vec2(),
+        center = Vec2.default(),
+        bounds = Box2.default(),
+        dimensions = Vec2.default(),
         levelOfDetail = 1,
         key = "0.0[16]",
         id = "terrain-chunk-1",
     } = {}) {
+        this.id = id
         this.vertices = []
         this.faces = []
         this.colors = []
@@ -759,7 +756,6 @@ class Chunk {
         //this.voxelBuffer = new Int32Array(0)
         this.vertexData = new VertexData()
         this.mesh = new Mesh(id)
-        this.isOccluded = false
         this.isRendered = false
         this.mostRecentSimulationRendered = false
         this.simulationDelta = 0.0
@@ -786,10 +782,6 @@ class Chunk {
         const startRun = this.getRun(startX, startZ)
         this.iter = new VoxelRunIterator(startRun, startX, startZ)
         this.columnIter = new VoxelColumnIterator(startRun, startX, startZ)
-
-        this.lookupCache1X = startX
-        this.lookupCache1Z = startZ
-        this.cachedRun1 = startRun
     }
 
     getRun(x: number, z: number) {
@@ -1416,7 +1408,7 @@ class Chunk {
             vd.colors = colors
         }
         vd.applyToMesh(mesh, true)
-        this.isOccluded = false
+        this.mesh.setEnabled(true)
         this.isRendered = true
         this.mostRecentSimulationRendered = true
         if (logStats) {
@@ -1425,9 +1417,17 @@ class Chunk {
     }
 
     destroyMesh() {
-        const name = this.mesh.name
         this.mesh.dispose()
-        this.mesh = new Mesh(name)
+        this.isRendered = false
+    }
+
+    reInitializeMesh() {
+        this.mesh = new Mesh(this.id)
+    }
+
+    hideMesh() {
+        this.isRendered = false
+        this.mesh.setEnabled(false)
     }
 
     vertexCount() {
@@ -1443,7 +1443,7 @@ const chunkkey = (x: number, z: number, size: number) => `${x}.${z}[${size}]`
 
 const NULL_CHUNK_HANDLE = -1
 
-const moduloIntFast = (dividend: number, divisor: number) => {
+const fastIntModulo = (dividend: number, divisor: number) => {
     return dividend - ~~(dividend / divisor) * divisor
 }
 
@@ -1467,6 +1467,9 @@ export class TerrainManager {
     nearestChunkBoundaryX: number
     nearestChunkBoundaryZ: number
     heightMap: null | HeightMap
+    
+    private quadTree: Quadtree
+    private recycleVec: Vec2
 
     constructor({
         heightMap = null as (HeightMap | null)
@@ -1479,6 +1482,12 @@ export class TerrainManager {
         this.chunks = []
         this.rebuildChunks = []
         this.heightMap = heightMap
+        this.quadTree = new Quadtree({
+            min: new Vec2(0, 0),
+            max: new Vec2(TERRAIN_MAX_X, TERRAIN_MAX_Z),
+            minNodeSize: CHUNK_X_DIMENSION
+        })
+        this.recycleVec = Vec2.default()
     }
 
     private getRecyclableChunk() {
@@ -1488,21 +1497,15 @@ export class TerrainManager {
         return this.recycledChunks.pop()!
     }
 
-    diffChunks(cameraX: number, cameraY: number) {
-        const maxZ = TERRAIN_MAX_Z
-        const maxX = TERRAIN_MAX_X
-        const quadTree = new Quadtree({
-            min: new Vec2(0, 0),
-            max: new Vec2(maxX, maxZ),
-            minNodeSize: CHUNK_X_DIMENSION
-        })
-        const camera = new Vec2(cameraX, cameraY)
+    diffChunks(cameraX: number, cameraZ: number) {
+        const quadTree = this.quadTree
+        const camera = this.recycleVec.overwrite(cameraX, cameraZ)
         quadTree.insert(camera)
-        const children = quadTree.getChildren()
-        console.log("children", children.length)
+        const leafCount = quadTree.leafCount()
 
         const newIndex = new Map()
-        for (const {center, size} of children) {
+        for (let i = 0; i < leafCount; i++) {
+            const {center, size} = quadTree.leaf(i)
             const key = chunkkey(center.x, center.z, size.x)
             newIndex.set(key, NULL_CHUNK_HANDLE)
         }
@@ -1520,7 +1523,8 @@ export class TerrainManager {
 
         let chunkref = 0
         let chunksReused = 0
-        for (const {center, bounds, size} of children) {
+        for (let i = 0; i < leafCount; i++) {
+            const {center, bounds, size} = quadTree.leaf(i)
             const key = chunkkey(center.x, center.z, size.x)
             if (oldIndex.has(key)) {
                 continue
@@ -1548,10 +1552,11 @@ export class TerrainManager {
             this.rebuildChunks.push(chunkref)
         }
 
-        for (const chunkref of this.recycledChunks) {
+        for (let i = 0; i < this.recycledChunks.length; i++) {
+            const chunkref = this.recycledChunks[i]
             const chunk = this.chunks[chunkref]
             if (chunk.isRendered) {
-                chunk.destroyMesh()
+                chunk.hideMesh()
             }
         } 
         this.chunkIndex = newIndex
@@ -1573,7 +1578,7 @@ export class TerrainManager {
             //chunk.simulate()
         }
         chunk.greedyMesh()
-        chunk.render({wireframe: false, logStats: true})
+        chunk.render({wireframe: false, logStats: false})
         return true
     }
 
@@ -1611,7 +1616,7 @@ export class TerrainManager {
     }
 
     chunkCount() {
-        return this.chunks.length
+        return this.quadTree.leafCount()
     }
 }
 
