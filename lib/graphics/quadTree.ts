@@ -19,6 +19,10 @@ export class Vec2 {
         return Math.sqrt((x - cmpx) ** 2 + (z - cmpz) ** 2)
     }
 
+    clone() {
+        return new Vec2(this.x, this.z)
+    }
+
     overwrite(x: number, z: number) {
         this.x = x
         this.z = z
@@ -46,7 +50,6 @@ export class Box2 {
         out.x = min.x + diffx
         out.z = min.z + diffz
         return out
-        //return new Vec2(min.x + diffx, min.z + diffz)
     }
 
     size(out: Vec2) {
@@ -56,7 +59,16 @@ export class Box2 {
         out.x = x
         out.z = z
         return out
-        //return new Vec2(x, z)
+    }
+
+    overwrite(min: Vec2, max: Vec2) {
+        this.min.overwrite(min.x, min.z)
+        this.max.overwrite(max.x, max.z)
+        return this
+    }
+
+    clone() {
+        return new Box2(this.min.clone(), this.max.clone())
     }
 }
 

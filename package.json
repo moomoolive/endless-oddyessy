@@ -8,10 +8,10 @@
   },
   "dependencies": {
     "alea": "^1.0.1",
-    "babylonjs": "^5.17.1",
-    "babylonjs-loaders": "^5.18.0",
-    "simplex-noise": "^4.0.0",
-    "stats.js": "^0.17.0"
+    "babylonjs": "^5.34.0",
+    "babylonjs-loaders": "^5.34.0",
+    "babylonjs-materials": "^5.34.0",
+    "simplex-noise": "^4.0.0"
   },
   "devDependencies": {
     "@types/live-server": "^1.2.1",

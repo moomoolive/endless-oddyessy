@@ -13,10 +13,12 @@ import {
     Quaternion,
     CreateBox,
     Color4,
-    DirectionalLight
+    HemisphericLight,
+    DirectionalLight,
+    CreatePlane,
 } from "babylonjs"
+import {SkyMaterial} from "babylonjs-materials" // for skybox
 import 'babylonjs-loaders' // for gltf loader
-import fpsMeter from "stats.js"
 import {
     sweepBoxCollisions, 
     sweepPoint,
@@ -26,24 +28,31 @@ import {
     lerp, toRadians, toDegrees, fpEqual, 
     createAxisRotation
 } from "./lib/math/index"
-import {TerrainManager, HeightMap} from "./lib/graphics/terrainManager"
-//import rawHeightMap from "./assets/terrain-16bit.json"
-//import {decode} from "fast-png"
+import {TerrainManager} from "./lib/graphics/terrainManager"
+import {
+    HeightMap, 
+    biome,
+    TERRAIN_MAX_X,
+    TERRAIN_MAX_Y,
+    TERRAIN_MAX_Z
+} from "./lib/terrain/index"
+import {VoxelColliders} from "./lib/physics/voxelColliders"
 
 const deceleration = new Vector3(-10.0, -0.0001, -10.0)
 
-const main = async () => {
+export const main = async () => {
     const canvas = document.createElement("canvas")
     canvas.style.width = "100vw"
     canvas.style.height = "100vh"
     document.body.appendChild(canvas)
     
-    const meter = new fpsMeter()
-    meter.showPanel(0)
-    document.body.appendChild(meter.dom)
-    
-    const engine = new Engine(canvas, true)
+    const engine = new Engine(canvas, true, {
+        adaptToDeviceRatio: true,
+        powerPreference: "high-performance"
+    })
+    engine
     const scene = new Scene(engine, {})
+    //scene.debugLayer.show({embedMode: true})
     
     const camera = new ArcRotateCamera(
         "camera", 
@@ -55,26 +64,25 @@ const main = async () => {
     camera.lowerBetaLimit = 0.1
     camera.attachControl(canvas, true)
     camera.inputs.clear()
-    const _light = new DirectionalLight(
-        "light1", new Vector3(0.0, -1.0, 0.0), scene
+    const sun = new DirectionalLight(
+        "sun", new Vector3(0.2, -1.0, 0.0), scene
     )
+    sun.intensity = 1.0
+    
 
-    const skybox = MeshBuilder.CreateBox(
-        "skyBox", {size: 10_000.0}, scene
-    )
-	const skyboxMaterial = new StandardMaterial("skyBox", scene)
-	skyboxMaterial.backFaceCulling = false
-	skyboxMaterial.reflectionTexture = new CubeTexture(
-        "./textures/resources/sky", scene
-        )
-	skyboxMaterial.reflectionTexture.coordinatesMode = Texture.SKYBOX_MODE
-	skyboxMaterial.diffuseColor = new Color3(0, 0, 0)
-	skyboxMaterial.specularColor = new Color3(0, 0, 0)
-	skybox.material = skyboxMaterial	
-
-    const boxMaterial = new StandardMaterial("grass", scene)
-    boxMaterial.backFaceCulling = true
-    boxMaterial.diffuseTexture = new Texture("./textures/grass-basic.png",)
+    const skyMaterial = new SkyMaterial("sky", scene)
+    skyMaterial.backFaceCulling = false
+    skyMaterial.turbidity = 20
+    skyMaterial.luminance = 0.1
+    skyMaterial.inclination = 0.5
+    skyMaterial.azimuth = 0.25
+    const skybox = MeshBuilder.CreateBox("skyBox", {
+        size: 11_000
+    }, scene)
+    skybox.infiniteDistance = true
+    //skybox.position.set(1_024, 0, 1_024)
+    skybox.material = skyMaterial
+    skybox.setEnabled(true)
     
     const playerModelPromise = SceneLoader.ImportMeshAsync(
         null, 
@@ -192,12 +200,6 @@ const main = async () => {
     }
 
     canvas.onclick  = () => canvas.requestPointerLock()
-    
-    //const chunkManager = new Chunks({
-    //    renderDistance: 4,
-    //    maxChunksX: 14,
-    //    maxChunksZ: 14
-    //})
 
     const playerEntity = {
         transform: {x: 0.0, y: 0.0, z: 0.0},
@@ -206,16 +208,24 @@ const main = async () => {
         kinematics: {mass: 10.0, gravityModifier: 1.0},
         velocity: {x: 0.0, y: 0.0, z: 0.0},
         acceleration: {x: 2_000.0, y: 0.25, z: 2_000.0},
-        position: {x: 2_048.0, y: 250.0, z: 2_048.0},
+        position: {x: 2_048.0, y: 100.0, z: 2_048.0},
         rendering: {id: 0},
     }
     const rawHeightMap = await import("./assets/terrain-16bit.json")
     const heightMap = new HeightMap(rawHeightMap)
     console.info(`imported height map (${heightMap.height},${heightMap.width}), with ${heightMap.uniqueDataPoints()} data points`)
+    console.log("chunking starting...")
+    const chunkStart = Date.now()
+    const colliders = VoxelColliders.fromHeightMap(
+        heightMap, 
+        TERRAIN_MAX_Y, 
+        TERRAIN_MAX_X, 
+        TERRAIN_MAX_Z, 
+        biome
+    )
+    console.info(`[stats]: chunking took ${((Date.now() - chunkStart) / 1_000).toLocaleString()}s`)
     
-    const chunkManager = new TerrainManager({
-        heightMap
-    })
+    const chunkManager = new TerrainManager({colliders})
 
     const lodSystemState = {
         boundaryX: {
@@ -228,7 +238,7 @@ const main = async () => {
         }
     }
 
-    const minChunkSize = 32
+    const minChunkSize = 16
 
     {
         const {x, z} = playerEntity.position
@@ -251,11 +261,12 @@ const main = async () => {
             ", chunks", chunkManager.chunkCount().toLocaleString()
         )
         console.info(
-            "[stats]: avg sim time", chunkManager.averageSimTime(),
-            "ms , avg mesh time", chunkManager.averageMeshTime(),
+            "[stats]: avg mesh time", chunkManager.averageMeshTime(),
             "ms, avg skirt time", chunkManager.averageSkirtTime(),
             "ms"
         )
+        //chunkManager.showTerrainSurrounding()
+        //chunkManager.showWater()
     }
 
     const p = await playerModelPromise
@@ -295,44 +306,8 @@ const main = async () => {
         cachedType: 0,
     }
 
-    const editMaterial = new StandardMaterial("EditBoxMaterial", scene)
-
-    editMaterial.alpha = 0.6
-    const editingBlock = CreateBox("editingBlock", {
-        width: 1.02, height: 1.02, depth: 1.02,
-        updatable: true,
-        faceColors: [
-            new Color4(1.0, 1.0, 0, 1.0),
-            new Color4(1.0, 1.0, 0, 1.0),
-            new Color4(1.0, 1.0, 0, 1.0),
-            new Color4(1.0, 1.0, 0, 1.0),
-            new Color4(1.0, 1.0, 0, 1.0),
-            new Color4(1.0, 1.0, 0, 1.0),
-        ]
-    }, scene)
-    editingBlock.position.set(46.0, 50.5, 200.0)
-    editingBlock.material = editMaterial
-
-    // mc sea level is 62
-    //const deleteTool = CreateBox("deleteTool", {
-    //    width: 5_000, height: 30.75, depth: 5_000,
-    //    updatable: true,
-    //    faceColors: [
-    //        new Color4(68/255, 85/255, 90/255, 1.0),
-    //        new Color4(68/255, 85/255, 90/255, 1.0),
-    //        new Color4(68/255, 85/255, 90/255, 1.0),
-    //        new Color4(68/255, 85/255, 90/255, 1.0),
-    //        new Color4(68/255, 85/255, 90/255, 1.0),
-    //        new Color4(68/255, 85/255, 90/255, 1.0),
-    //    ]
-    //}, scene)
-    //deleteTool.position.set(2_048.0, 31.0, 2_048.0)
-    //deleteTool.material = editMaterial
-    //deleteTool.setEnabled(false)
-
     const editingBlockRayCast = new CollisionInfo()
     engine.runRenderLoop(() => {
-        meter.begin()
         const deltaTime = engine.getDeltaTime()
         const deltaSeconds = deltaTime * 0.0001
         
@@ -516,7 +491,7 @@ const main = async () => {
             const res = sweepBoxCollisions(
                 playerEntity.position,
                 playerEntity.collider, 
-                chunkManager,
+                {isVoxelSolid: (x, y, z) => false},
                 playerEntity.velocity.x * deltaSeconds,
                 playerEntity.velocity.y * deltaSeconds,
                 playerEntity.velocity.z * deltaSeconds,
@@ -683,8 +658,7 @@ const main = async () => {
         }
         */
 
-        {
-
+        /*{
             const {x, z} = player.position
             const {boundaryX, boundaryZ} = lodSystemState
             if (
@@ -705,18 +679,21 @@ const main = async () => {
                 console.info("diffed chunks", boundaryX, boundaryZ, x, z)
             }
             chunkManager.execPendingTask()
-        }
+        }*/
 
         // some logging stuff
         {
             console.log("terrain chunks", chunkManager.chunkCount())
         }
 
+        // adjust horizon
+        {
+            skyMaterial.cameraOffset.y = scene.activeCamera!.globalPosition.y
+        }
+
         {
             scene.render()
         }
-
-        meter.end()
     })
 }   
 
